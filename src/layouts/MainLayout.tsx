@@ -25,7 +25,7 @@ export default function MainLayout() {
             className="size-10 shrink-0 rounded-xl object-cover"
           />
           <div>
-            <p className="text-sm font-bold tracking-tight text-slate-900">Sustrato WorkCoffee</p>
+            <p className="text-sm font-bold tracking-tight text-slate-900">Sutrato WorkCoffee</p>
             <p className="text-xs text-slate-500">Gestión de Planillas</p>
           </div>
         </div>
