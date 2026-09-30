@@ -317,7 +317,7 @@ export default function Dashboard() {
             <p className="mt-3 text-sm font-semibold text-slate-800">Aún no hay pagos registrados</p>
             <p className="mt-1 text-sm text-slate-500">Cuando se registre un pago aparecerá aquí.</p>
             <Link to="/documentos" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-primary-600 hover:text-primary-700">
-              Ir a gestión comercial <ArrowRight size={15} />
+              Ir a Gestión Comercial <ArrowRight size={15} />
             </Link>
           </div>
         )}
