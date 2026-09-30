@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { ArrowRight, Files, LockKeyhole, LoaderCircle, Mail, ShieldCheck } from 'lucide-react'
+import { ArrowRight, LockKeyhole, LoaderCircle, Mail, ShieldCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 
@@ -40,19 +40,19 @@ export default function Login() {
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10 sm:px-6">
       <div className="grid w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/[0.06] lg:min-h-[620px] lg:grid-cols-[1.05fr_0.95fr]">
         <section className="flex flex-col justify-between bg-primary-700 p-8 text-white sm:p-12 lg:p-14">
-      <div className="flex items-center gap-3">
-  <div className="flex h-11 items-center justify-center overflow-hidden rounded-xl bg-white/15 px-2 ring-1 ring-white/20">
-  <img 
-  src="/Sustrato Logo.png" 
-  alt="Sutrato Logo" 
-  className="h-8 w-auto object-contain" 
-/>
-  </div>
-  <div>
-    <p className="text-base font-bold tracking-tight">Sutrato WorkCoffee</p>
-    <p className="text-xs text-blue-100">Gestión de planillas</p>
-  </div>
-</div>
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 items-center justify-center overflow-hidden rounded-xl bg-white/15 px-2 ring-1 ring-white/20">
+              <img 
+                src="/Sustrato Logo.png" 
+                alt="Sutrato Logo" 
+                className="h-8 w-auto object-contain" 
+              />
+            </div>
+            <div>
+              <p className="text-base font-bold tracking-tight">Sutrato WorkCoffee</p>
+              <p className="text-xs text-blue-100">Gestión de planillas</p>
+            </div>
+          </div>
 
           <div className="my-12 max-w-md">
             <p className="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-blue-200">
@@ -62,7 +62,7 @@ export default function Login() {
               Crea tus planillas de forma automatizada, sin perder tiempo.
             </h1>
             <p className="mt-5 max-w-sm text-sm leading-6 text-blue-100 sm:text-base">
-              Crea y consulta planillas, organiza  y accede a tus archivos desde un solo espacio.
+              Crea y consulta planillas, organiza y accede a tus archivos desde un solo espacio.
             </p>
           </div>
 
