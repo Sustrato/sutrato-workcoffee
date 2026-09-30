@@ -32,3 +32,62 @@ button,
 input {
   font: inherit;
 }
+
+.contract-prose {
+  min-height: 8in;
+  padding: 0.25in;
+  color: #1e293b;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 11pt;
+  line-height: 1.6;
+}
+
+.contract-prose h1,
+.contract-prose h2 {
+  margin: 1.5em 0 0.65em;
+  color: #0f172a;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 700;
+}
+
+.contract-prose h1 {
+  margin-top: 0;
+  text-align: center;
+  font-size: 16pt;
+}
+
+.contract-prose h2 {
+  font-size: 12pt;
+}
+
+.contract-prose p {
+  margin: 0 0 0.9em;
+  text-align: justify;
+}
+
+.contract-prose ul,
+.contract-prose ol {
+  margin: 0 0 1em;
+  padding-left: 1.75em;
+}
+
+.contract-prose ul {
+  list-style: disc;
+}
+
+.contract-prose ol {
+  list-style: decimal;
+}
+
+.contract-prose li {
+  padding-left: 0.25em;
+}
+
+@media print {
+  .contract-prose {
+    min-height: 0;
+    padding: 0;
+    color: #000;
+    font-size: 11pt;
+  }
+}

@@ -3,13 +3,17 @@ import {
   BriefcaseBusiness,
   Clock3,
   Files,
+  FileText,
   LayoutDashboard,
+  Settings2,
 } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
 
 const navigation = [
   { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, end: true },
-  { label: 'Documentos', to: '/documentos', icon: Files },
+  { label: 'Empresas', to: '/documentos', icon: Files },
+  { label: 'Contratos', to: '/contratos', icon: FileText },
+  { label: 'Plantilla de contrato', to: '/configuracion/plantilla-contrato', icon: Settings2 },
   { label: 'Categorías', to: '/categorias', icon: BriefcaseBusiness },
   { label: 'Historial', to: '/historial', icon: Clock3 },
 ]
@@ -17,7 +21,7 @@ const navigation = [
 export default function MainLayout() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col border-r border-slate-200 bg-white md:flex">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col border-r border-slate-200 bg-white md:flex print:hidden">
         <div className="flex h-20 items-center gap-3 border-b border-slate-100 px-6">
           <img
             src="/Sustrato%20Logo.png"
@@ -69,7 +73,7 @@ export default function MainLayout() {
       </aside>
 
       <div className="md:pl-64">
-        <header className="app-navbar sticky top-0 z-10 flex h-20 items-center justify-between gap-4 border-b border-slate-200 bg-white/95 px-4 backdrop-blur sm:px-8">
+        <header className="app-navbar sticky top-0 z-10 flex h-20 items-center justify-between gap-4 border-b border-slate-200 bg-white/95 px-4 backdrop-blur sm:px-8 print:hidden">
           <div className="flex shrink-0 items-center gap-3 sm:gap-5">
             <button
               type="button"
@@ -92,7 +96,7 @@ export default function MainLayout() {
           </div>
         </header>
 
-        <main className="min-h-[calc(100vh-5rem)] p-4 sm:p-8">
+        <main className="min-h-[calc(100vh-5rem)] p-4 sm:p-8 print:min-h-0 print:p-0">
           <Outlet />
         </main>
       </div>

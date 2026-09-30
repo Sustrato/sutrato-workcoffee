@@ -15,16 +15,14 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { importIngresosCsv } from '../services/importIngresosCsv'
+import { importIngresosCsv } from '../services/importIngresosCsv.ts'
+import { getEmpresaContratos, uploadEmpresaContrato, type EmpresaContrato } from '../services/empresaContratos'
 import {
-  deleteContract,
-  deleteContractByPublicUrl,
   deleteVoucher,
   deleteVoucherByPublicUrl,
   empresaService,
   getSignedContractUrl,
   getSignedVoucherUrl,
-  uploadContract,
   uploadVoucher,
 } from '../services/supabaseStorage.ts'
 
@@ -108,7 +106,7 @@ const EMPTY_PAGO: PagoFormData = {
 
 function formatDate(value?: string): string {
   if (!value) return '—'
-  const date = new Date(value)
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00`) : new Date(value)
   if (Number.isNaN(date.getTime())) return value
 
   return new Intl.DateTimeFormat('es-CL', {
@@ -116,6 +114,66 @@ function formatDate(value?: string): string {
     month: 'short',
     year: 'numeric',
   }).format(date)
+}
+
+function getNextPaymentDate(frequency: string, startDate: string): string {
+  if (!startDate) return ''
+  const [year, month, day] = startDate.split('-').map(Number)
+  if (!year || !month || !day) return ''
+
+  const normalizedFrequency = frequency.trim().toLocaleLowerCase('es-CL')
+  if (normalizedFrequency === 'mensual') {
+    return new Date(Date.UTC(year, month, 5)).toISOString().slice(0, 10)
+  }
+  if (normalizedFrequency === 'anual') {
+    const nextYear = year + 1
+    const lastDayOfMonth = new Date(Date.UTC(nextYear, month, 0)).getUTCDate()
+    return new Date(Date.UTC(nextYear, month - 1, Math.min(day, lastDayOfMonth))).toISOString().slice(0, 10)
+  }
+  return ''
+}
+
+function getLatestNextPayment(payments: Pago[] = []): string | undefined {
+  return payments
+    .filter((payment) => Boolean(payment.proximo_pago))
+    .sort((first, second) => (second.fecha_pago ?? '').localeCompare(first.fecha_pago ?? ''))[0]
+    ?.proximo_pago
+}
+
+function getPaymentDueStatus(nextPaymentDate?: string): {
+  color: 'green' | 'yellow' | 'red' | 'neutral'
+  label: string
+} {
+  if (!nextPaymentDate) return { color: 'neutral', label: 'Sin fecha' }
+
+  const [year, month, day] = nextPaymentDate.slice(0, 10).split('-').map(Number)
+  if (!year || !month || !day) return { color: 'neutral', label: 'Sin fecha' }
+
+  const today = new Date()
+  const todayTimestamp = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+  const dueTimestamp = Date.UTC(year, month - 1, day)
+  const daysUntilDue = Math.round((dueTimestamp - todayTimestamp) / 86_400_000)
+
+  if (daysUntilDue < 0) {
+    const overdueDays = Math.abs(daysUntilDue)
+    return { color: 'red', label: `Atrasado por ${overdueDays} ${overdueDays === 1 ? 'día' : 'días'}` }
+  }
+  if (daysUntilDue <= 5) {
+    if (daysUntilDue === 0) return { color: 'yellow', label: 'Vence hoy' }
+    return { color: 'yellow', label: `Por vencer en ${daysUntilDue} ${daysUntilDue === 1 ? 'día' : 'días'}` }
+  }
+  return { color: 'green', label: `Al día · ${formatDate(nextPaymentDate)}` }
+}
+
+function formatExactDate(value: string): string {
+  return new Intl.DateTimeFormat('es-CL', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(value))
 }
 
 function formatMoney(value?: number): string {
@@ -183,7 +241,7 @@ function TextField({
   )
 }
 
-export default function Documentos() {
+export default function Empresas() {
   const [empresas, setEmpresas] = useState<Empresa[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSavingEmpresa, setIsSavingEmpresa] = useState(false)
@@ -197,6 +255,8 @@ export default function Documentos() {
   const [editingEmpresa, setEditingEmpresa] = useState<Empresa | null>(null)
   const [empresaForm, setEmpresaForm] = useState<EmpresaFormData>(EMPTY_EMPRESA)
   const [contractFile, setContractFile] = useState<File | null>(null)
+  const [contractHistory, setContractHistory] = useState<EmpresaContrato[]>([])
+  const [isLoadingContractHistory, setIsLoadingContractHistory] = useState(false)
   const contractInputRef = useRef<HTMLInputElement>(null)
   const [selectedEmpresa, setSelectedEmpresa] = useState<Empresa | null>(null)
   const [editingPago, setEditingPago] = useState<Pago | null>(null)
@@ -239,6 +299,20 @@ export default function Documentos() {
       isMounted = false
     }
   }, [])
+
+  useEffect(() => {
+    const companyId = editingEmpresa?.id
+    if (companyId === undefined) return
+
+    let active = true
+    getEmpresaContratos(companyId)
+      .then((history) => { if (active) setContractHistory(history) })
+      .catch((historyError: unknown) => {
+        if (active) setError(historyError instanceof Error ? historyError.message : 'No se pudo cargar el historial de contratos.')
+      })
+      .finally(() => { if (active) setIsLoadingContractHistory(false) })
+    return () => { active = false }
+  }, [editingEmpresa?.id])
 
   const filteredEmpresas = useMemo(() => {
     const query = search.trim().toLocaleLowerCase('es-CL')
@@ -343,6 +417,8 @@ export default function Documentos() {
 
   function openCreateEmpresa() {
     setEditingEmpresa(null)
+    setContractHistory([])
+    setIsLoadingContractHistory(false)
     setEmpresaForm(EMPTY_EMPRESA)
     setContractFile(null)
     if (contractInputRef.current) contractInputRef.current.value = ''
@@ -352,6 +428,8 @@ export default function Documentos() {
 
   function openEditEmpresa(empresa: Empresa) {
     setEditingEmpresa(empresa)
+    setContractHistory([])
+    setIsLoadingContractHistory(true)
     setContractFile(null)
     if (contractInputRef.current) contractInputRef.current.value = ''
     setEmpresaForm({
@@ -373,46 +451,60 @@ export default function Documentos() {
     setError('')
     setSuccess('')
     setIsSavingEmpresa(true)
-    let uploadedContractPath: string | null = null
+    let persistedCompany: Empresa | null = null
     try {
       const hasValidRut = Boolean(empresaForm.rut.trim())
       if (!editingEmpresa && !hasValidRut) throw new Error('Ingresa el RUT antes de adjuntar el contrato.')
-      let contractUrl = editingEmpresa?.contrato_url ?? null
-      if (contractFile) {
-        const storageIdentifier = editingEmpresa?.id ?? `rut-${empresaForm.rut.trim().replace(/[^a-zA-Z0-9-]/g, '')}`
-        const uploaded = await uploadContract(contractFile, storageIdentifier)
-        contractUrl = uploaded.url
-        uploadedContractPath = uploaded.path
-      }
 
       const empresaData = {
-        ...empresaForm,
-        rut: empresaForm.rut.trim(),
         nombre: empresaForm.nombre.trim(),
+        rut: empresaForm.rut.trim(),
         direccion: empresaForm.direccion.trim(),
         representante_legal: empresaForm.representante_legal.trim(),
         rut_representante: empresaForm.rut_representante.trim(),
         contacto: empresaForm.contacto.trim(),
+        frecuencia: empresaForm.frecuencia,
         estado: empresaForm.estado,
-        contrato_url: contractUrl,
+        contrato_url: editingEmpresa?.contrato_url ?? null,
       }
+      const isEditing = editingEmpresa !== null
+      let createdCompany: Empresa | null = null
       if (editingEmpresa?.id === undefined) {
-        await empresaService.createEmpresa(empresaData)
+        const createdRows = await empresaService.createEmpresa(empresaData)
+        createdCompany = (createdRows?.[0] as Empresa | undefined) ?? null
+        if (!createdCompany) throw new Error('La empresa se guardó, pero no se pudo recuperar su registro.')
+        persistedCompany = createdCompany
       } else {
-        await empresaService.updateEmpresa(editingEmpresa.id, empresaData)
+        persistedCompany = await empresaService.updateEmpresa(editingEmpresa.id, empresaData) as Empresa
       }
-      if (contractFile && editingEmpresa?.contrato_url) {
-        await deleteContractByPublicUrl(editingEmpresa.contrato_url)
+
+      if (contractFile) {
+        if (persistedCompany.id === undefined) throw new Error('No se pudo identificar la empresa para guardar su contrato.')
+        const historyEntry = await uploadEmpresaContrato(
+          persistedCompany.id,
+          contractFile,
+          persistedCompany.contrato_url ?? null,
+        )
+        persistedCompany = { ...persistedCompany, contrato_url: historyEntry.contrato_url }
+        setContractHistory((current) => [historyEntry, ...current])
       }
       setEmpresaForm(EMPTY_EMPRESA)
       setEditingEmpresa(null)
       setContractFile(null)
       if (contractInputRef.current) contractInputRef.current.value = ''
       setIsEmpresaModalOpen(false)
-      setSuccess(editingEmpresa ? 'Empresa actualizada correctamente.' : 'Empresa registrada correctamente.')
+      setSuccess(isEditing ? 'Empresa actualizada correctamente.' : 'Empresa registrada correctamente.')
+      if (!isEditing && createdCompany?.id !== undefined) {
+        setPagoForm({
+          ...EMPTY_PAGO,
+          proximo_pago: getNextPaymentDate(createdCompany.frecuencia, EMPTY_PAGO.fecha_pago),
+        })
+        setSelectedEmpresa({ ...persistedCompany, id: createdCompany.id, pagos: [] })
+        setSuccess('Empresa registrada. Registra ahora el pago inicial o la mensualidad.')
+      }
       await loadEmpresas()
     } catch (createError) {
-      if (uploadedContractPath) await deleteContract(uploadedContractPath)
+      if (persistedCompany && !editingEmpresa) setEditingEmpresa(persistedCompany)
       console.error('No se pudo registrar la empresa:', createError)
       setError(createError instanceof Error ? createError.message : 'No fue posible registrar la empresa.')
     } finally {
@@ -587,7 +679,13 @@ export default function Documentos() {
   }
 
   const updatePagoField = (field: keyof PagoFormData, value: string) => {
-    setPagoForm((current) => ({ ...current, [field]: value }))
+    setPagoForm((current) => {
+      const updatedForm = { ...current, [field]: value }
+      if (field === 'fecha_pago' && selectedEmpresa) {
+        updatedForm.proximo_pago = getNextPaymentDate(selectedEmpresa.frecuencia, value)
+      }
+      return updatedForm
+    })
   }
 
   async function openPrivateFile(reference: string, getSignedUrl: (value: string) => Promise<string>) {
@@ -605,6 +703,24 @@ export default function Documentos() {
     }
   }
 
+  async function downloadContractFile(contract: EmpresaContrato) {
+    try {
+      const signedUrl = await getSignedContractUrl(contract.contrato_url)
+      const response = await fetch(signedUrl)
+      if (!response.ok) throw new Error('No se pudo descargar el contrato.')
+      const fileUrl = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = fileUrl
+      link.download = contract.nombre_archivo
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(fileUrl), 0)
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : 'No se pudo descargar el contrato.')
+    }
+  }
+
   const bruto = Number(pagoForm.bruto) || 0
   const netoCalculado = Math.round((bruto / 1.19) * 100) / 100
   const ivaCalculado = Math.round((bruto - netoCalculado) * 100) / 100
@@ -616,7 +732,13 @@ export default function Documentos() {
 
   function handleEmpresaPagoChange(rut: string) {
     const empresa = empresas.find((item) => item.rut === rut)
-    if (empresa) setSelectedEmpresa(empresa)
+    if (empresa) {
+      setSelectedEmpresa(empresa)
+      setPagoForm((current) => ({
+        ...current,
+        proximo_pago: getNextPaymentDate(empresa.frecuencia, current.fecha_pago),
+      }))
+    }
   }
 
   return (
@@ -761,7 +883,7 @@ export default function Documentos() {
           </div>
         ) : filteredEmpresas.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] text-left">
+            <table className="w-full min-w-[1300px] text-left">
               <thead>
                 <tr className="border-y border-slate-100 bg-slate-50/80 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <th scope="col" className="px-5 py-3 sm:px-6">Empresa / RUT</th>
@@ -769,6 +891,7 @@ export default function Documentos() {
                   <th scope="col" className="px-4 py-3">Representante legal / RUT</th>
                   <th scope="col" className="px-4 py-3">Contacto</th>
                   <th scope="col" className="px-4 py-3">Frecuencia</th>
+                  <th scope="col" className="px-4 py-3">Próximo pago</th>
                   <th scope="col" className="px-4 py-3">Vigencia</th>
                   <th scope="col" className="px-5 py-3 text-right sm:px-6">Acciones</th>
                 </tr>
@@ -776,6 +899,20 @@ export default function Documentos() {
               <tbody className="divide-y divide-slate-100">
                 {filteredEmpresas.map((empresa) => {
                   const vigente = isVigente(empresa.estado)
+                  const nextPaymentDate = getLatestNextPayment(empresa.pagos)
+                  const paymentDueStatus = getPaymentDueStatus(nextPaymentDate)
+                  const dueStatusClasses = {
+                    green: 'bg-emerald-50 text-emerald-700',
+                    yellow: 'bg-amber-50 text-amber-700',
+                    red: 'bg-rose-50 text-rose-700',
+                    neutral: 'bg-slate-100 text-slate-500',
+                  }[paymentDueStatus.color]
+                  const dueDotClasses = {
+                    green: 'bg-emerald-500',
+                    yellow: 'bg-amber-500',
+                    red: 'bg-rose-500',
+                    neutral: 'bg-slate-400',
+                  }[paymentDueStatus.color]
                   return (
                     <tr key={String(empresa.id ?? empresa.rut)} className="transition-colors hover:bg-slate-50/70">
                       <td className="px-5 py-4 sm:px-6">
@@ -798,6 +935,12 @@ export default function Documentos() {
                       <td className="px-4 py-4">
                         <span className="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600">
                           {empresa.frecuencia ? empresa.frecuencia.toLocaleUpperCase('es-CL') : '—'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${dueStatusClasses}`}>
+                          <span className={`size-1.5 rounded-full ${dueDotClasses}`} />
+                          {paymentDueStatus.label}
                         </span>
                       </td>
                       <td className="px-4 py-4">
@@ -843,7 +986,10 @@ export default function Documentos() {
                             type="button"
                             onClick={() => {
                               setSelectedEmpresa(empresa)
-                              setPagoForm(EMPTY_PAGO)
+                              setPagoForm({
+                                ...EMPTY_PAGO,
+                                proximo_pago: getNextPaymentDate(empresa.frecuencia, EMPTY_PAGO.fecha_pago),
+                              })
                               setError('')
                             }}
                             className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-primary-200 px-3 py-2 text-xs font-semibold text-primary-700 transition hover:border-primary-300 hover:bg-primary-50"
@@ -909,7 +1055,7 @@ export default function Documentos() {
                 </div>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-                <label htmlFor="empresa-contrato" className="mb-1.5 block text-sm font-medium text-slate-700">Contrato (PDF o imagen)</label>
+                <label htmlFor="empresa-contrato" className="mb-1.5 block text-sm font-medium text-slate-700">Contrato (PDF, JPG o PNG)</label>
                 {editingEmpresa?.contrato_url && (
                   <button
                     type="button"
@@ -924,7 +1070,7 @@ export default function Documentos() {
                   ref={contractInputRef}
                   id="empresa-contrato"
                   type="file"
-                  accept="application/pdf,image/*,.pdf"
+                  accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
                   disabled={isSavingEmpresa}
                   onChange={(event) => {
                     const file = event.target.files?.[0] ?? null
@@ -934,10 +1080,10 @@ export default function Documentos() {
                     }
                     const extension = file.name.split('.').pop()?.toLocaleLowerCase()
                     const isPdf = file.type === 'application/pdf' || extension === 'pdf'
-                    const isImage = file.type.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(extension ?? '')
+                    const isImage = ['image/jpeg', 'image/png'].includes(file.type) || ['png', 'jpg', 'jpeg'].includes(extension ?? '')
                     if (!isPdf && !isImage) {
                       setContractFile(null)
-                      setError('Selecciona un contrato en PDF o imagen.')
+                      setError('Selecciona un contrato PDF, JPG o PNG.')
                       event.target.value = ''
                       return
                     }
@@ -960,8 +1106,33 @@ export default function Documentos() {
                   </p>
                 ) : (
                   <p className="mt-2 text-xs text-slate-400">
-                    {editingEmpresa?.contrato_url ? 'Selecciona otro archivo para reemplazar el contrato actual.' : 'Adjunta un contrato para abrirlo desde el directorio.'}
+                    {editingEmpresa?.contrato_url ? 'Adjunta otro archivo para agregarlo al historial de contratos.' : 'Adjunta un contrato para registrarlo en el historial de la empresa.'}
                   </p>
+                )}
+                {editingEmpresa?.id !== undefined && (
+                  <div className="mt-4 border-t border-slate-200 pt-4">
+                    <h3 className="text-sm font-semibold text-slate-800">Historial de contratos subidos</h3>
+                    {isLoadingContractHistory ? (
+                      <p className="mt-3 flex items-center gap-2 text-xs text-slate-500"><LoaderCircle size={14} className="animate-spin" /> Cargando historial...</p>
+                    ) : contractHistory.length === 0 ? (
+                      <p className="mt-2 text-xs text-slate-500">Aún no hay contratos en el historial.</p>
+                    ) : (
+                      <ul className="mt-3 divide-y divide-slate-200">
+                        {contractHistory.map((contract) => (
+                          <li key={contract.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-slate-700">{contract.nombre_archivo}</p>
+                              <time dateTime={contract.created_at} className="mt-1 block text-xs text-slate-500">{formatExactDate(contract.created_at)}</time>
+                            </div>
+                            <div className="flex shrink-0 gap-2">
+                              <button type="button" onClick={() => void openPrivateFile(contract.contrato_url, getSignedContractUrl)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"><ExternalLink size={14} />Ver</button>
+                              <button type="button" onClick={() => void downloadContractFile(contract)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"><Download size={14} />Descargar</button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 )}
               </div>
               {error && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
@@ -1099,6 +1270,7 @@ export default function Documentos() {
                   <div>
                     <label htmlFor="pago-proximo" className="mb-1.5 block text-sm font-medium text-slate-700">Próximo pago</label>
                     <input id="pago-proximo" type="date" required value={pagoForm.proximo_pago} onChange={(event) => updatePagoField('proximo_pago', event.target.value)} className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100" />
+                    <p className="mt-1 text-xs text-slate-500">Se calcula según la frecuencia y puedes ajustarlo manualmente.</p>
                   </div>
                 </div>
                 <div>
