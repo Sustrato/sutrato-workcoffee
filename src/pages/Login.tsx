@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { ArrowRight, LockKeyhole, LoaderCircle, Mail, ShieldCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+
 import { supabase } from '../services/supabase'
 
 export default function Login() {
