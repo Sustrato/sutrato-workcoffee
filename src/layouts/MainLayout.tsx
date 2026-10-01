@@ -14,6 +14,7 @@ const navigation = [
   { label: 'Empresas', to: '/documentos', icon: Files },
   { label: 'Contratos', to: '/contratos', icon: FileText },
   { label: 'Plantilla de contrato', to: '/configuracion/plantilla-contrato', icon: Settings2 },
+  { label: 'Historial SII', to: '/historial-sii', icon: Clock3 },
   { label: 'Categorías', to: '/categorias', icon: BriefcaseBusiness },
   { label: 'Historial', to: '/historial', icon: Clock3 },
 ]

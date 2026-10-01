@@ -11,18 +11,21 @@ import {
   LoaderCircle,
   Plus,
   Search,
+  Trash2,
   Upload,
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { importIngresosCsv } from '../services/importIngresosCsv.ts'
 import { getEmpresaContratos, uploadEmpresaContrato, type EmpresaContrato } from '../services/empresaContratos'
+import { EMPRESAS_UPDATED_EVENT } from '../services/siiNotices'
 import {
   deleteVoucher,
   deleteVoucherByPublicUrl,
   empresaService,
   getSignedContractUrl,
   getSignedVoucherUrl,
+  deleteContractByPublicUrl,
   uploadVoucher,
 } from '../services/supabaseStorage.ts'
 
@@ -78,6 +81,7 @@ interface PagoFormData {
 
 interface PagoEditFormData {
   fecha_pago: string
+  proximo_pago: string
   forma_pago: string
   bruto: string
   monto_liquido: string
@@ -123,13 +127,29 @@ function getNextPaymentDate(frequency: string, startDate: string): string {
 
   const normalizedFrequency = frequency.trim().toLocaleLowerCase('es-CL')
   if (normalizedFrequency === 'mensual') {
-    return new Date(Date.UTC(year, month, 5)).toISOString().slice(0, 10)
+    const cutoffMonth = day < 5 ? month - 1 : month
+    return new Date(Date.UTC(year, cutoffMonth, 5)).toISOString().slice(0, 10)
   }
   if (normalizedFrequency === 'anual') {
-    const nextYear = year + 1
-    const lastDayOfMonth = new Date(Date.UTC(nextYear, month, 0)).getUTCDate()
-    return new Date(Date.UTC(nextYear, month - 1, Math.min(day, lastDayOfMonth))).toISOString().slice(0, 10)
+    return new Date(Date.UTC(year + 1, month - 1, day)).toISOString().slice(0, 10)
   }
+  return ''
+}
+
+function getDefaultPaymentAmount(frequency: string, transactionDate: string): string {
+  const normalizedFrequency = frequency.trim().toLocaleLowerCase('es-CL')
+  if (normalizedFrequency === 'mensual') {
+    const monthlyRate = 15000
+    const dayOfMonth = Number(transactionDate.slice(8, 10))
+    if (dayOfMonth === 5) return String(monthlyRate)
+
+    const nextPaymentDate = getNextPaymentDate(frequency, transactionDate)
+    const startTimestamp = new Date(`${transactionDate}T00:00:00Z`).getTime()
+    const cutoffTimestamp = new Date(`${nextPaymentDate}T00:00:00Z`).getTime()
+    const coveredDays = Math.max(0, Math.round((cutoffTimestamp - startTimestamp) / 86_400_000))
+    return String(Math.round((monthlyRate / 30) * coveredDays))
+  }
+  if (normalizedFrequency === 'anual') return '180000'
   return ''
 }
 
@@ -192,6 +212,10 @@ function isVigente(estado: Empresa['estado']): boolean {
   return ['vigente', 'activo', 'activa', 'true', 'al día', 'al dia'].includes(value)
 }
 
+function isDesvinculada(estado: Empresa['estado']): boolean {
+  return typeof estado === 'string' && estado.trim().toLocaleUpperCase('es-CL') === 'DESVINCULADA'
+}
+
 function escapeCsv(value: string): string {
   return `"${value.replaceAll('"', '""')}"`
 }
@@ -244,6 +268,10 @@ function TextField({
 export default function Empresas() {
   const [empresas, setEmpresas] = useState<Empresa[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [empresaToDelete, setEmpresaToDelete] = useState<Empresa | null>(null)
+  const [deleteConfirmation, setDeleteConfirmation] = useState('')
+  const [isDeletingEmpresa, setIsDeletingEmpresa] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
   const [isSavingEmpresa, setIsSavingEmpresa] = useState(false)
   const [isSavingPago, setIsSavingPago] = useState(false)
   const [isImportingCsv, setIsImportingCsv] = useState(false)
@@ -260,7 +288,7 @@ export default function Empresas() {
   const contractInputRef = useRef<HTMLInputElement>(null)
   const [selectedEmpresa, setSelectedEmpresa] = useState<Empresa | null>(null)
   const [editingPago, setEditingPago] = useState<Pago | null>(null)
-  const [pagoEditForm, setPagoEditForm] = useState<PagoEditFormData>({ fecha_pago: '', forma_pago: 'Transferencia', bruto: '', monto_liquido: '' })
+  const [pagoEditForm, setPagoEditForm] = useState<PagoEditFormData>({ fecha_pago: '', proximo_pago: '', forma_pago: 'Transferencia', bruto: '', monto_liquido: '' })
   const [voucherEditFile, setVoucherEditFile] = useState<File | null>(null)
   const voucherEditInputRef = useRef<HTMLInputElement>(null)
   const [pagoForm, setPagoForm] = useState<PagoFormData>(EMPTY_PAGO)
@@ -299,6 +327,12 @@ export default function Empresas() {
       isMounted = false
     }
   }, [])
+
+  useEffect(() => {
+    const refreshEmpresas = () => { void loadEmpresas() }
+    window.addEventListener(EMPRESAS_UPDATED_EVENT, refreshEmpresas)
+    return () => window.removeEventListener(EMPRESAS_UPDATED_EVENT, refreshEmpresas)
+  }, [loadEmpresas])
 
   useEffect(() => {
     const companyId = editingEmpresa?.id
@@ -497,6 +531,7 @@ export default function Empresas() {
       if (!isEditing && createdCompany?.id !== undefined) {
         setPagoForm({
           ...EMPTY_PAGO,
+          bruto: getDefaultPaymentAmount(createdCompany.frecuencia, EMPTY_PAGO.fecha_pago),
           proximo_pago: getNextPaymentDate(createdCompany.frecuencia, EMPTY_PAGO.fecha_pago),
         })
         setSelectedEmpresa({ ...persistedCompany, id: createdCompany.id, pagos: [] })
@@ -542,6 +577,10 @@ export default function Empresas() {
   async function handleCreatePago(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedEmpresa) return
+    if (selectedEmpresa.id === undefined) {
+      setError('No se pudo identificar la empresa para registrar el pago.')
+      return
+    }
     const montoLiquido = pagoForm.monto_liquido.trim() === '' ? bruto : Number(pagoForm.monto_liquido)
     if (!Number.isFinite(montoLiquido) || montoLiquido < 0 || montoLiquido > bruto) {
       setError('El monto líquido debe ser igual o menor al monto bruto.')
@@ -552,8 +591,9 @@ export default function Empresas() {
     setSuccess('')
     setIsSavingPago(true)
     let uploadedVoucherPath: string | null = null
+    let paymentSaved = false
     try {
-      const empresaId = selectedEmpresa.id ?? selectedEmpresa.rut
+      const empresaId = selectedEmpresa.id
       let voucherUrl: string | null = null
       if (voucherFile) {
         const uploadedVoucher = await uploadVoucher(voucherFile, empresaId)
@@ -572,19 +612,27 @@ export default function Empresas() {
         proximo_pago: pagoForm.proximo_pago,
         voucher_url: voucherUrl,
       })
+      paymentSaved = true
+      await empresaService.updateEmpresa(empresaId, { estado: 'VIGENTE' })
+      setEmpresas((current) => current.map((empresa) =>
+        empresa.id === empresaId ? { ...empresa, estado: 'VIGENTE' } : empresa,
+      ))
       setPagoForm(EMPTY_PAGO)
       setVoucherFile(null)
       if (voucherInputRef.current) voucherInputRef.current.value = ''
-      setSuccess(`Pago registrado para ${selectedEmpresa.nombre}.`)
+      setSuccess(`Pago registrado y empresa ${selectedEmpresa.nombre} marcada VIGENTE.`)
       await loadEmpresas()
       const refreshedCompanies = await empresaService.getEmpresas() as Empresa[]
       const refreshedSelected = refreshedCompanies.find((empresa) => empresa.rut === selectedEmpresa.rut)
       if (refreshedSelected) setSelectedEmpresa(refreshedSelected)
-      else setSelectedEmpresa({ ...selectedEmpresa, pagos: [...(selectedEmpresa.pagos ?? []), { ...pagoForm, bruto, neto: netoCalculado, iva: ivaCalculado, monto_liquido: montoLiquido, comision_tarjeta: comisionTarjeta }] })
+      else setSelectedEmpresa({ ...selectedEmpresa, estado: 'VIGENTE', pagos: [...(selectedEmpresa.pagos ?? []), { ...pagoForm, bruto, neto: netoCalculado, iva: ivaCalculado, monto_liquido: montoLiquido, comision_tarjeta: comisionTarjeta }] })
     } catch (paymentError) {
-      if (uploadedVoucherPath) await deleteVoucher(uploadedVoucherPath)
+      if (uploadedVoucherPath && !paymentSaved) await deleteVoucher(uploadedVoucherPath)
       console.error('No se pudo registrar el pago:', paymentError)
-      setError(paymentError instanceof Error ? paymentError.message : 'No fue posible registrar el pago.')
+      const details = paymentError instanceof Error ? paymentError.message : 'Intenta nuevamente.'
+      setError(paymentSaved
+        ? `El pago se guardó, pero no se pudo actualizar la empresa a VIGENTE: ${details}`
+        : `No fue posible registrar el pago: ${details}`)
     } finally {
       setIsSavingPago(false)
     }
@@ -598,6 +646,7 @@ export default function Empresas() {
     setEditingPago(pago)
     setPagoEditForm({
       fecha_pago: pago.fecha_pago?.slice(0, 10) ?? '',
+      proximo_pago: pago.proximo_pago?.slice(0, 10) ?? '',
       forma_pago: pago.forma_pago ?? 'Transferencia',
       bruto: String(pago.bruto ?? ''),
       monto_liquido: pago.monto_liquido === null || pago.monto_liquido === undefined
@@ -643,6 +692,7 @@ export default function Empresas() {
 
       await empresaService.updatePago(editingPago.id, {
         fecha_pago: pagoEditForm.fecha_pago,
+        proximo_pago: pagoEditForm.proximo_pago,
         forma_pago: pagoEditForm.forma_pago,
         bruto: brutoEditado,
         neto: netoEditado,
@@ -656,7 +706,7 @@ export default function Empresas() {
       }
       const updatedPayments = (selectedEmpresa?.pagos ?? []).map((pago) =>
         pago.id === editingPago.id
-          ? { ...pago, fecha_pago: pagoEditForm.fecha_pago, forma_pago: pagoEditForm.forma_pago, bruto: brutoEditado, neto: netoEditado, iva: ivaEditado, monto_liquido: montoLiquidoEditado, comision_tarjeta: comisionTarjetaEditada, voucher_url: voucherUrl }
+          ? { ...pago, fecha_pago: pagoEditForm.fecha_pago, proximo_pago: pagoEditForm.proximo_pago, forma_pago: pagoEditForm.forma_pago, bruto: brutoEditado, neto: netoEditado, iva: ivaEditado, monto_liquido: montoLiquidoEditado, comision_tarjeta: comisionTarjetaEditada, voucher_url: voucherUrl }
           : pago,
       )
       if (selectedEmpresa) setSelectedEmpresa({ ...selectedEmpresa, pagos: updatedPayments })
@@ -683,6 +733,7 @@ export default function Empresas() {
       const updatedForm = { ...current, [field]: value }
       if (field === 'fecha_pago' && selectedEmpresa) {
         updatedForm.proximo_pago = getNextPaymentDate(selectedEmpresa.frecuencia, value)
+        updatedForm.bruto = getDefaultPaymentAmount(selectedEmpresa.frecuencia, value)
       }
       return updatedForm
     })
@@ -721,6 +772,43 @@ export default function Empresas() {
     }
   }
 
+  async function handleDeleteEmpresa() {
+    if (empresaToDelete?.id === undefined || deleteConfirmation.trim() !== 'ELIMINAR' || isDeletingEmpresa) return
+
+    setIsDeletingEmpresa(true)
+    setDeleteError('')
+    try {
+      const contractHistory = await getEmpresaContratos(empresaToDelete.id)
+      await empresaService.deleteEmpresa(empresaToDelete.id)
+
+      const contractReferences = new Set([
+        empresaToDelete.contrato_url,
+        ...contractHistory.map((contract) => contract.contrato_url),
+      ].filter((reference): reference is string => Boolean(reference)))
+      const voucherReferences = new Set(
+        (empresaToDelete.pagos ?? [])
+          .map((payment) => payment.voucher_url)
+          .filter((reference): reference is string => Boolean(reference)),
+      )
+
+      await Promise.all([
+        ...[...contractReferences].map((reference) => deleteContractByPublicUrl(reference)),
+        ...[...voucherReferences].map((reference) => deleteVoucherByPublicUrl(reference)),
+      ])
+
+      const deletedName = empresaToDelete.nombre
+      setEmpresaToDelete(null)
+      setDeleteConfirmation('')
+      setSuccess(`Empresa ${deletedName} eliminada correctamente.`)
+      await loadEmpresas()
+    } catch (deleteCompanyError) {
+      console.error('No se pudo eliminar la empresa:', deleteCompanyError)
+      setDeleteError(deleteCompanyError instanceof Error ? deleteCompanyError.message : 'No se pudo eliminar la empresa.')
+    } finally {
+      setIsDeletingEmpresa(false)
+    }
+  }
+
   const bruto = Number(pagoForm.bruto) || 0
   const netoCalculado = Math.round((bruto / 1.19) * 100) / 100
   const ivaCalculado = Math.round((bruto - netoCalculado) * 100) / 100
@@ -736,6 +824,7 @@ export default function Empresas() {
       setSelectedEmpresa(empresa)
       setPagoForm((current) => ({
         ...current,
+        bruto: getDefaultPaymentAmount(empresa.frecuencia, current.fecha_pago),
         proximo_pago: getNextPaymentDate(empresa.frecuencia, current.fecha_pago),
       }))
     }
@@ -899,8 +988,19 @@ export default function Empresas() {
               <tbody className="divide-y divide-slate-100">
                 {filteredEmpresas.map((empresa) => {
                   const vigente = isVigente(empresa.estado)
+                  const desvinculada = isDesvinculada(empresa.estado)
                   const nextPaymentDate = getLatestNextPayment(empresa.pagos)
                   const paymentDueStatus = getPaymentDueStatus(nextPaymentDate)
+                  const vigenciaClasses = desvinculada
+                    ? 'bg-slate-100 text-slate-600 ring-1 ring-slate-300'
+                    : vigente
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-rose-50 text-rose-700'
+                  const vigenciaDotClasses = desvinculada
+                    ? 'bg-slate-500'
+                    : vigente
+                      ? 'bg-emerald-500'
+                      : 'bg-rose-500'
                   const dueStatusClasses = {
                     green: 'bg-emerald-50 text-emerald-700',
                     yellow: 'bg-amber-50 text-amber-700',
@@ -944,9 +1044,9 @@ export default function Empresas() {
                         </span>
                       </td>
                       <td className="px-4 py-4">
-                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${vigente ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
-                          <span className={`size-1.5 rounded-full ${vigente ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-                          {vigente ? 'VIGENTE' : 'NO VIGENTE'}
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${vigenciaClasses}`}>
+                          <span className={`size-1.5 rounded-full ${vigenciaDotClasses}`} />
+                          {desvinculada ? 'DESVINCULADA' : vigente ? 'VIGENTE' : 'NO VIGENTE'}
                         </span>
                       </td>
                       <td className="px-5 py-4 text-right sm:px-6">
@@ -959,6 +1059,20 @@ export default function Empresas() {
                             title="Editar empresa"
                           >
                             <Edit2 size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={empresa.id === undefined}
+                            onClick={() => {
+                              setEmpresaToDelete(empresa)
+                              setDeleteConfirmation('')
+                              setDeleteError('')
+                            }}
+                            className="inline-flex size-9 items-center justify-center rounded-lg border border-rose-200 text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            aria-label={`Eliminar ${empresa.nombre}`}
+                            title="Eliminar empresa"
+                          >
+                            <Trash2 size={16} />
                           </button>
                           {empresa.contrato_url ? (
                             <button
@@ -988,6 +1102,7 @@ export default function Empresas() {
                               setSelectedEmpresa(empresa)
                               setPagoForm({
                                 ...EMPTY_PAGO,
+                                bruto: getDefaultPaymentAmount(empresa.frecuencia, EMPTY_PAGO.fecha_pago),
                                 proximo_pago: getNextPaymentDate(empresa.frecuencia, EMPTY_PAGO.fecha_pago),
                               })
                               setError('')
@@ -1148,6 +1263,47 @@ export default function Empresas() {
         </div>
       )}
 
+      {empresaToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-[2px]">
+          <section role="alertdialog" aria-modal="true" aria-labelledby="delete-company-title" aria-describedby="delete-company-warning" className="my-auto w-full max-w-lg overflow-hidden rounded-xl border border-rose-100 bg-white shadow-2xl shadow-slate-950/25">
+            <div className="border-b border-slate-100 px-6 py-5">
+              <div className="flex items-start gap-3">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-700"><Trash2 size={19} /></span>
+                <div>
+                  <h2 id="delete-company-title" className="text-lg font-semibold text-slate-900">Eliminar empresa</h2>
+                  <p className="mt-1 text-sm text-slate-600">{empresaToDelete.nombre} · RUT {empresaToDelete.rut}</p>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <p id="delete-company-warning" className="text-sm leading-6 text-slate-700">
+                Esta acción es irreversible. También puede afectar sus pagos, comprobantes, contratos e historial relacionados. Si alguna relación de la base de datos impide eliminarla, Supabase cancelará la operación y verás el error.
+              </p>
+              <div>
+                <label htmlFor="delete-company-confirmation" className="mb-1.5 block text-sm font-medium text-slate-700">Escribe ELIMINAR para confirmar</label>
+                <input
+                  id="delete-company-confirmation"
+                  type="text"
+                  autoComplete="off"
+                  value={deleteConfirmation}
+                  onChange={(event) => setDeleteConfirmation(event.target.value)}
+                  disabled={isDeletingEmpresa}
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 disabled:bg-slate-50"
+                />
+              </div>
+              {deleteError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{deleteError}</p>}
+            </div>
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-6 py-4 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => { setEmpresaToDelete(null); setDeleteConfirmation(''); setDeleteError('') }} disabled={isDeletingEmpresa} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
+              <button type="button" onClick={() => void handleDeleteEmpresa()} disabled={isDeletingEmpresa || deleteConfirmation.trim() !== 'ELIMINAR'} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50">
+                {isDeletingEmpresa ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                {isDeletingEmpresa ? 'Eliminando...' : 'Eliminar definitivamente'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {selectedEmpresa && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/45 p-4 backdrop-blur-[2px]">
           <section role="dialog" aria-modal="true" aria-labelledby="payments-title" className="my-auto w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl shadow-slate-950/20">
@@ -1262,6 +1418,11 @@ export default function Empresas() {
                   <div>
                     <label htmlFor="pago-bruto" className="mb-1.5 block text-sm font-medium text-slate-700">Monto bruto</label>
                     <input id="pago-bruto" type="number" min="0" step="1" required value={pagoForm.bruto} onChange={(event) => updatePagoField('bruto', event.target.value)} placeholder="Ingresa el monto bruto" className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100" />
+                    <p className="mt-1 text-xs text-slate-500">
+                      {selectedEmpresa.frecuencia.trim().toLocaleLowerCase('es-CL') === 'mensual'
+                        ? 'El monto se prorratea según los días hasta el próximo corte del día 5; puedes ajustarlo manualmente.'
+                        : 'El plan anual se cobra completo, sin prorrateo; puedes ajustar el monto manualmente.'}
+                    </p>
                   </div>
                   <div>
                     <label htmlFor="pago-liquido" className="mb-1.5 block text-sm font-medium text-slate-700">Monto líquido recibido (opcional)</label>
@@ -1369,6 +1530,10 @@ export default function Empresas() {
               <div>
                 <label htmlFor="edit-pago-fecha" className="mb-1.5 block text-sm font-medium text-slate-700">Fecha de pago</label>
                 <input id="edit-pago-fecha" type="date" required value={pagoEditForm.fecha_pago} onChange={(event) => setPagoEditForm((current) => ({ ...current, fecha_pago: event.target.value }))} className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100" />
+              </div>
+              <div>
+                <label htmlFor="edit-pago-proximo" className="mb-1.5 block text-sm font-medium text-slate-700">Próximo pago / vencimiento</label>
+                <input id="edit-pago-proximo" type="date" required value={pagoEditForm.proximo_pago} onChange={(event) => setPagoEditForm((current) => ({ ...current, proximo_pago: event.target.value }))} className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100" />
               </div>
               <div>
                 <label htmlFor="edit-pago-forma" className="mb-1.5 block text-sm font-medium text-slate-700">Forma de pago</label>

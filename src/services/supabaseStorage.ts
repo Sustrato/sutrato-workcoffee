@@ -125,6 +125,18 @@ export const empresaService = {
     return data
   },
 
+  deleteEmpresa: async (id: string | number) => {
+    const { data, error } = await supabase
+      .from('empresas')
+      .delete()
+      .eq('id', id)
+      .select('id')
+      .single()
+
+    if (error) throw new Error(`No se pudo eliminar la empresa: ${error.message}`)
+    return data
+  },
+
   createPago: async (pagoData: {
     empresa_id: string
     fecha_pago: string
@@ -148,6 +160,7 @@ export const empresaService = {
 
   updatePago: async (id: string | number, pagoData: {
     fecha_pago: string
+    proximo_pago: string
     forma_pago: string
     bruto: number
     neto: number
