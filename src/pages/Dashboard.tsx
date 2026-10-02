@@ -21,6 +21,7 @@ interface EmpresaRow {
   rut: string
   nombre: string
   estado: string | boolean | null
+  frecuencia: string | null
 }
 
 interface PagoRow {
@@ -29,19 +30,29 @@ interface PagoRow {
   fecha_pago: string
   forma_pago: string | null
   bruto: number | string | null
+  neto: number | string | null
 }
 
 interface DashboardData {
   empresas: EmpresaRow[]
   pagos: PagoRow[]
+  mesActual: string
 }
 
 const PAGE_SIZE = 1000
 
-function isVigente(estado: EmpresaRow['estado']): boolean {
-  if (typeof estado === 'boolean') return estado
-  const normalized = String(estado ?? 'vigente').trim().toLocaleLowerCase('es-CL')
-  return ['vigente', 'activo', 'activa', 'true', 'al día', 'al dia'].includes(normalized)
+function normalizeCompanyStatus(estado: EmpresaRow['estado']): 'VIGENTE' | 'NO VIGENTE' | 'DESVINCULADA' | 'OTRO' {
+  if (typeof estado === 'boolean') return estado ? 'VIGENTE' : 'NO VIGENTE'
+  const normalized = String(estado ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleUpperCase('es-CL')
+
+  if (['VIGENTE', 'ACTIVO', 'ACTIVA', 'TRUE', 'AL DIA'].includes(normalized)) return 'VIGENTE'
+  if (normalized === 'NO VIGENTE' || normalized === 'NO_VIGENTE') return 'NO VIGENTE'
+  if (normalized === 'DESVINCULADA') return 'DESVINCULADA'
+  return 'OTRO'
 }
 
 function formatMoney(value: number): string {
@@ -105,7 +116,7 @@ function MetricCard({
 }
 
 export default function Dashboard() {
-  const [data, setData] = useState<DashboardData>({ empresas: [], pagos: [] })
+  const [data, setData] = useState<DashboardData>({ empresas: [], pagos: [], mesActual: '' })
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -114,13 +125,15 @@ export default function Dashboard() {
     try {
       const [empresas, pagos] = await Promise.all([
         fetchAllRows<EmpresaRow>((from, to) =>
-          supabase.from('empresas').select('id, rut, nombre, estado').range(from, to),
+          supabase.from('empresas').select('id, rut, nombre, estado, frecuencia').range(from, to),
         ),
         fetchAllRows<PagoRow>((from, to) =>
-          supabase.from('pagos').select('id, empresa_id, fecha_pago, forma_pago, bruto').range(from, to),
+          supabase.from('pagos').select('id, empresa_id, fecha_pago, forma_pago, bruto, neto').range(from, to),
         ),
       ])
-      setData({ empresas, pagos })
+      const now = new Date()
+      const mesActual = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+      setData({ empresas, pagos, mesActual })
     } catch (loadError) {
       console.error('No se pudieron cargar las métricas del dashboard:', loadError)
       setError(loadError instanceof Error ? loadError.message : 'No fue posible cargar el resumen desde Supabase.')
@@ -142,9 +155,31 @@ export default function Dashboard() {
   }
 
   const totalEmpresas = data.empresas.length
-  const empresasVigentes = data.empresas.filter((empresa) => isVigente(empresa.estado)).length
-  const totalBruto = data.pagos.reduce((total, pago) => total + (Number(pago.bruto) || 0), 0)
+  const empresasVigentes = data.empresas.filter((empresa) => normalizeCompanyStatus(empresa.estado) === 'VIGENTE').length
+  const empresasNoVigentes = data.empresas.filter((empresa) => normalizeCompanyStatus(empresa.estado) === 'NO VIGENTE').length
+  const empresasDesvinculadas = data.empresas.filter((empresa) => normalizeCompanyStatus(empresa.estado) === 'DESVINCULADA').length
   const empresasById = new Map(data.empresas.map((empresa) => [String(empresa.id), empresa]))
+  const pagosDelMes = data.pagos.filter((pago) => pago.fecha_pago.slice(0, 10).startsWith(data.mesActual))
+  const totalBrutoMes = pagosDelMes.reduce((total, pago) => total + (Number(pago.bruto) || 0), 0)
+  const ingresosMensuales = pagosDelMes.reduce((total, pago) => {
+    const company = empresasById.get(String(pago.empresa_id))
+    return company?.frecuencia?.trim().toLocaleLowerCase('es-CL') === 'mensual'
+      ? total + (Number(pago.bruto) || 0)
+      : total
+  }, 0)
+  const ingresosAnuales = pagosDelMes.reduce((total, pago) => {
+    const company = empresasById.get(String(pago.empresa_id))
+    return company?.frecuencia?.trim().toLocaleLowerCase('es-CL') === 'anual'
+      ? total + (Number(pago.bruto) || 0)
+      : total
+  }, 0)
+  const otrosIngresos = totalBrutoMes - ingresosMensuales - ingresosAnuales
+  const ivaTotalMes = Math.round(totalBrutoMes * 0.19)
+  const utilidadTotalMes = pagosDelMes.reduce((total, pago) => {
+    const bruto = Number(pago.bruto) || 0
+    const neto = pago.neto === null || pago.neto === undefined ? bruto / 1.19 : Number(pago.neto) || 0
+    return total + neto
+  }, 0)
   const pagosRecientes = [...data.pagos]
     .sort((first, second) => new Date(second.fecha_pago).getTime() - new Date(first.fecha_pago).getTime())
     .slice(0, 6)
@@ -181,30 +216,79 @@ export default function Dashboard() {
 
       <section aria-label="Indicadores comerciales" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          title="Total de empresas"
-          value={isLoading ? '—' : totalEmpresas.toLocaleString('es-CL')}
-          subtitle="Clientes registrados en Supabase"
-          icon={Building2}
-          iconStyle="bg-primary-50 text-primary-600"
-        />
-        <MetricCard
-          title="Empresas vigentes"
-          value={isLoading ? '—' : empresasVigentes.toLocaleString('es-CL')}
-          subtitle="Con estado vigente o activo"
-          icon={CheckCircle2}
-          iconStyle="bg-emerald-50 text-emerald-600"
-        />
-        <MetricCard
-          title="Ingresos totales (bruto)"
-          value={isLoading ? '—' : formatMoney(totalBruto)}
-          subtitle="Suma de montos brutos registrados"
+          title="Total recaudado del mes"
+          value={isLoading ? '—' : formatMoney(totalBrutoMes)}
+          subtitle="Flujo real de pagos ingresados este mes"
           icon={CircleDollarSign}
           iconStyle="bg-violet-50 text-violet-600"
         />
         <MetricCard
-          title="Pagos registrados"
-          value={isLoading ? '—' : data.pagos.length.toLocaleString('es-CL')}
-          subtitle="Transacciones guardadas en Supabase"
+          title="Planes mensuales"
+          value={isLoading ? '—' : formatMoney(ingresosMensuales)}
+          subtitle="Recaudación bruta mensual del periodo"
+          icon={CreditCard}
+          iconStyle="bg-sky-50 text-sky-600"
+        />
+        <MetricCard
+          title="Planes anuales"
+          value={isLoading ? '—' : formatMoney(ingresosAnuales)}
+          subtitle="Pagos anuales recibidos este mes"
+          icon={CalendarClock}
+          iconStyle="bg-indigo-50 text-indigo-600"
+        />
+        <MetricCard
+          title="Otros planes"
+          value={isLoading ? '—' : formatMoney(otrosIngresos)}
+          subtitle="Trimestrales, semestrales u otros"
+          icon={CircleDollarSign}
+          iconStyle="bg-slate-100 text-slate-600"
+        />
+        <MetricCard
+          title="IVA total"
+          value={isLoading ? '—' : formatMoney(ivaTotalMes)}
+          subtitle="19% de la recaudación bruta mensual"
+          icon={CircleDollarSign}
+          iconStyle="bg-amber-50 text-amber-600"
+        />
+        <MetricCard
+          title="Utilidad total"
+          value={isLoading ? '—' : formatMoney(utilidadTotalMes)}
+          subtitle="Suma del neto real registrado"
+          icon={CircleDollarSign}
+          iconStyle="bg-emerald-50 text-emerald-600"
+        />
+        <MetricCard
+          title="Total de empresas"
+          value={isLoading ? '—' : totalEmpresas.toLocaleString('es-CL')}
+          subtitle="Empresas registradas"
+          icon={Building2}
+          iconStyle="bg-primary-50 text-primary-600"
+        />
+        <MetricCard
+          title="Vigentes"
+          value={isLoading ? '—' : empresasVigentes.toLocaleString('es-CL')}
+          subtitle="Estado VIGENTE"
+          icon={CheckCircle2}
+          iconStyle="bg-emerald-50 text-emerald-600"
+        />
+        <MetricCard
+          title="No vigentes"
+          value={isLoading ? '—' : empresasNoVigentes.toLocaleString('es-CL')}
+          subtitle="Estado NO VIGENTE"
+          icon={FileWarning}
+          iconStyle="bg-rose-50 text-rose-600"
+        />
+        <MetricCard
+          title="Desvinculadas"
+          value={isLoading ? '—' : empresasDesvinculadas.toLocaleString('es-CL')}
+          subtitle="Procesadas por cese SII"
+          icon={UsersRound}
+          iconStyle="bg-slate-100 text-slate-600"
+        />
+        <MetricCard
+          title="Pagos del mes"
+          value={isLoading ? '—' : pagosDelMes.length.toLocaleString('es-CL')}
+          subtitle="Transacciones de este periodo"
           icon={CreditCard}
           iconStyle="bg-amber-50 text-amber-600"
         />

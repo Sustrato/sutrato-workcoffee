@@ -1,24 +1,30 @@
 import {
   Building2,
+  ChevronDown,
   CheckCircle2,
   Clock3,
   CreditCard,
   Download,
   Edit2,
   ExternalLink,
+  Filter,
   FileSearch,
   FileImage,
   LoaderCircle,
   Plus,
   Search,
+  Send,
   Trash2,
   Upload,
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { importIngresosCsv } from '../services/importIngresosCsv.ts'
 import { getEmpresaContratos, uploadEmpresaContrato, type EmpresaContrato } from '../services/empresaContratos'
+import { sendCompanyTestEmail } from '../services/email'
 import { EMPRESAS_UPDATED_EVENT } from '../services/siiNotices'
+import { PAYMENTS_UPDATED_EVENT } from '../services/notifications'
 import {
   deleteVoucher,
   deleteVoucherByPublicUrl,
@@ -45,6 +51,9 @@ interface Pago {
 }
 
 type CsvExportOption = 'completo' | 'empresas' | 'pagos'
+type EstadoEmpresaFilter = 'TODAS' | 'VIGENTE' | 'NO VIGENTE' | 'DESVINCULADA'
+type VencimientoFilter = 'TODOS' | 'green' | 'yellow' | 'red'
+type FilterPopover = 'estado' | 'vencimiento' | null
 
 interface Empresa {
   id?: string | number
@@ -54,6 +63,7 @@ interface Empresa {
   representante_legal: string
   rut_representante: string
   contacto: string
+  email?: string | null
   frecuencia: FrecuenciaPago | string
   estado: string | boolean | null
   contrato_url?: string | null
@@ -67,6 +77,7 @@ interface EmpresaFormData {
   representante_legal: string
   rut_representante: string
   contacto: string
+  email: string
   frecuencia: FrecuenciaPago
   estado: string
 }
@@ -88,6 +99,7 @@ interface PagoEditFormData {
 }
 
 const FRECUENCIAS: FrecuenciaPago[] = ['Mensual', 'Trimestral', 'Semestral', 'Anual']
+const FILTER_POPOVER_WIDTH = 256
 
 const EMPTY_EMPRESA: EmpresaFormData = {
   rut: '',
@@ -96,6 +108,7 @@ const EMPTY_EMPRESA: EmpresaFormData = {
   representante_legal: '',
   rut_representante: '',
   contacto: '',
+  email: '',
   frecuencia: 'Mensual',
   estado: 'VIGENTE',
 }
@@ -206,14 +219,23 @@ function formatMoney(value?: number): string {
 }
 
 function isVigente(estado: Empresa['estado']): boolean {
-  if (estado === null || estado === undefined || estado === '') return true
-  if (typeof estado === 'boolean') return estado
-  const value = estado?.trim().toLocaleLowerCase('es-CL') ?? ''
-  return ['vigente', 'activo', 'activa', 'true', 'al día', 'al dia'].includes(value)
+  return getEstadoEmpresa(estado) === 'VIGENTE'
 }
 
 function isDesvinculada(estado: Empresa['estado']): boolean {
-  return typeof estado === 'string' && estado.trim().toLocaleUpperCase('es-CL') === 'DESVINCULADA'
+  return getEstadoEmpresa(estado) === 'DESVINCULADA'
+}
+
+function getEstadoEmpresa(estado: Empresa['estado']): Exclude<EstadoEmpresaFilter, 'TODAS'> {
+  if (typeof estado === 'boolean') return estado ? 'VIGENTE' : 'NO VIGENTE'
+  const normalized = String(estado ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleUpperCase('es-CL')
+  if (!normalized || ['VIGENTE', 'ACTIVO', 'ACTIVA', 'TRUE', 'AL DIA'].includes(normalized)) return 'VIGENTE'
+  if (normalized === 'DESVINCULADA') return 'DESVINCULADA'
+  return 'NO VIGENTE'
 }
 
 function escapeCsv(value: string): string {
@@ -240,6 +262,7 @@ function TextField({
   label,
   value,
   onChange,
+  type = 'text',
   required = true,
   placeholder,
 }: {
@@ -247,6 +270,7 @@ function TextField({
   label: string
   value: string
   onChange: (value: string) => void
+  type?: 'text' | 'email'
   required?: boolean
   placeholder?: string
 }) {
@@ -255,6 +279,7 @@ function TextField({
       <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
       <input
         id={id}
+        type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         required={required}
@@ -273,12 +298,20 @@ export default function Empresas() {
   const [isDeletingEmpresa, setIsDeletingEmpresa] = useState(false)
   const [deleteError, setDeleteError] = useState('')
   const [isSavingEmpresa, setIsSavingEmpresa] = useState(false)
+  const [testingEmailEmpresaId, setTestingEmailEmpresaId] = useState<string | null>(null)
   const [isSavingPago, setIsSavingPago] = useState(false)
   const [isImportingCsv, setIsImportingCsv] = useState(false)
   const importCsvInputRef = useRef<HTMLInputElement>(null)
   const voucherInputRef = useRef<HTMLInputElement>(null)
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [estadoEmpresaFilter, setEstadoEmpresaFilter] = useState<EstadoEmpresaFilter>('TODAS')
+  const [vencimientoFilter, setVencimientoFilter] = useState<VencimientoFilter>('TODOS')
+  const [activeFilterPopover, setActiveFilterPopover] = useState<FilterPopover>(null)
+  const [filterPopoverPosition, setFilterPopoverPosition] = useState<{ top: number; left: number } | null>(null)
+  const statusFilterTriggerRef = useRef<HTMLButtonElement>(null)
+  const dueFilterTriggerRef = useRef<HTMLButtonElement>(null)
+  const filterPopoverRef = useRef<HTMLDivElement>(null)
   const [isEmpresaModalOpen, setIsEmpresaModalOpen] = useState(false)
   const [editingEmpresa, setEditingEmpresa] = useState<Empresa | null>(null)
   const [empresaForm, setEmpresaForm] = useState<EmpresaFormData>(EMPTY_EMPRESA)
@@ -288,6 +321,10 @@ export default function Empresas() {
   const contractInputRef = useRef<HTMLInputElement>(null)
   const [selectedEmpresa, setSelectedEmpresa] = useState<Empresa | null>(null)
   const [editingPago, setEditingPago] = useState<Pago | null>(null)
+  const [pagoToDelete, setPagoToDelete] = useState<Pago | null>(null)
+  const [deletePagoConfirmation, setDeletePagoConfirmation] = useState('')
+  const [isDeletingPago, setIsDeletingPago] = useState(false)
+  const [deletePagoError, setDeletePagoError] = useState('')
   const [pagoEditForm, setPagoEditForm] = useState<PagoEditFormData>({ fecha_pago: '', proximo_pago: '', forma_pago: 'Transferencia', bruto: '', monto_liquido: '' })
   const [voucherEditFile, setVoucherEditFile] = useState<File | null>(null)
   const voucherEditInputRef = useRef<HTMLInputElement>(null)
@@ -350,9 +387,8 @@ export default function Empresas() {
 
   const filteredEmpresas = useMemo(() => {
     const query = search.trim().toLocaleLowerCase('es-CL')
-    if (!query) return empresas
     return empresas.filter((empresa) =>
-      [
+      (!query || [
         empresa.rut,
         empresa.nombre,
         empresa.direccion,
@@ -364,12 +400,55 @@ export default function Empresas() {
       ]
         .join(' ')
         .toLocaleLowerCase('es-CL')
-        .includes(query),
+        .includes(query)) &&
+      (estadoEmpresaFilter === 'TODAS' || getEstadoEmpresa(empresa.estado) === estadoEmpresaFilter) &&
+      (vencimientoFilter === 'TODOS' || getPaymentDueStatus(getLatestNextPayment(empresa.pagos)).color === vencimientoFilter),
     )
-  }, [empresas, search])
+  }, [empresas, estadoEmpresaFilter, search, vencimientoFilter])
+
+  function toggleFilterPopover(filter: Exclude<FilterPopover, null>, trigger: HTMLButtonElement) {
+    if (activeFilterPopover === filter) {
+      setActiveFilterPopover(null)
+      return
+    }
+    const bounds = trigger.getBoundingClientRect()
+    setFilterPopoverPosition({
+      top: bounds.bottom + 6,
+      left: Math.max(8, Math.min(bounds.left, window.innerWidth - FILTER_POPOVER_WIDTH - 8)),
+    })
+    setActiveFilterPopover(filter)
+  }
+
+  useEffect(() => {
+    if (!activeFilterPopover) return
+    function closePopover(event: PointerEvent) {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (filterPopoverRef.current?.contains(target)) return
+      if (statusFilterTriggerRef.current?.contains(target) || dueFilterTriggerRef.current?.contains(target)) return
+      setActiveFilterPopover(null)
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setActiveFilterPopover(null)
+    }
+    function closeOnViewportChange() {
+      setActiveFilterPopover(null)
+    }
+    document.addEventListener('pointerdown', closePopover)
+    document.addEventListener('keydown', closeOnEscape)
+    window.addEventListener('resize', closeOnViewportChange)
+    window.addEventListener('scroll', closeOnViewportChange, true)
+    return () => {
+      document.removeEventListener('pointerdown', closePopover)
+      document.removeEventListener('keydown', closeOnEscape)
+      window.removeEventListener('resize', closeOnViewportChange)
+      window.removeEventListener('scroll', closeOnViewportChange, true)
+    }
+  }, [activeFilterPopover])
 
   function handleExportCsv(option: CsvExportOption) {
     const date = new Date().toISOString().slice(0, 10)
+    const companiesToExport = filteredEmpresas
     const companyHeaders = [
       'Empresa',
       'RUT',
@@ -399,14 +478,14 @@ export default function Empresas() {
       empresa.rut_representante,
       empresa.contacto,
       (empresa.frecuencia ?? '').toLocaleUpperCase('es-CL'),
-      isVigente(empresa.estado) ? 'VIGENTE' : 'NO VIGENTE',
+      getEstadoEmpresa(empresa.estado),
     ]
-    const payments = empresas.flatMap((empresa) =>
+    const payments = companiesToExport.flatMap((empresa) =>
       (empresa.pagos ?? []).map((pago) => ({ empresa, pago })),
     )
 
     if (option === 'empresas') {
-      downloadCsv(`empresas_${date}.csv`, companyHeaders, empresas.map(companyRow))
+      downloadCsv(`empresas_${date}.csv`, companyHeaders, companiesToExport.map(companyRow))
     } else if (option === 'pagos') {
       downloadCsv(
         `pagos_${date}.csv`,
@@ -425,7 +504,7 @@ export default function Empresas() {
       )
     } else {
       const fullHeaders = [...companyHeaders, ...paymentHeaders]
-      const fullRows = empresas.flatMap((empresa) => {
+      const fullRows = companiesToExport.flatMap((empresa) => {
         const company = companyRow(empresa)
         const companyPayments = empresa.pagos ?? []
         if (companyPayments.length === 0) return [[...company, '', '', '', '', '', '', '', '', '']]
@@ -447,6 +526,26 @@ export default function Empresas() {
     }
 
     setIsExportMenuOpen(false)
+  }
+
+  const filterOptions = activeFilterPopover === 'estado'
+    ? [
+        { value: 'TODAS', label: 'Todos los estados' },
+        { value: 'VIGENTE', label: 'VIGENTE' },
+        { value: 'NO VIGENTE', label: 'NO VIGENTE' },
+        { value: 'DESVINCULADA', label: 'DESVINCULADA' },
+      ]
+    : [
+        { value: 'TODOS', label: 'Todos los vencimientos' },
+        { value: 'green', label: 'Al día' },
+        { value: 'yellow', label: 'Por vencer' },
+        { value: 'red', label: 'Atrasados' },
+      ]
+
+  function selectFilterOption(value: string) {
+    if (activeFilterPopover === 'estado') setEstadoEmpresaFilter(value as EstadoEmpresaFilter)
+    if (activeFilterPopover === 'vencimiento') setVencimientoFilter(value as VencimientoFilter)
+    setActiveFilterPopover(null)
   }
 
   function openCreateEmpresa() {
@@ -473,6 +572,7 @@ export default function Empresas() {
       representante_legal: empresa.representante_legal,
       rut_representante: empresa.rut_representante,
       contacto: empresa.contacto,
+      email: empresa.email ?? '',
       frecuencia: FRECUENCIAS.find((frecuencia) => frecuencia.toLocaleLowerCase('es-CL') === empresa.frecuencia.toLocaleLowerCase('es-CL')) ?? 'Mensual',
       estado: isVigente(empresa.estado) ? 'VIGENTE' : 'NO VIGENTE',
     })
@@ -497,6 +597,7 @@ export default function Empresas() {
         representante_legal: empresaForm.representante_legal.trim(),
         rut_representante: empresaForm.rut_representante.trim(),
         contacto: empresaForm.contacto.trim(),
+        email: empresaForm.email.trim() || null,
         frecuencia: empresaForm.frecuencia,
         estado: empresaForm.estado,
         contrato_url: editingEmpresa?.contrato_url ?? null,
@@ -544,6 +645,25 @@ export default function Empresas() {
       setError(createError instanceof Error ? createError.message : 'No fue posible registrar la empresa.')
     } finally {
       setIsSavingEmpresa(false)
+    }
+  }
+
+  async function handleTestEmail(empresa: Empresa) {
+    if (empresa.id === undefined || empresa.estado !== 'VIGENTE' || !empresa.email?.trim()) {
+      setError('El correo de prueba sólo está disponible para empresas VIGENTES con correo registrado.')
+      return
+    }
+
+    setError('')
+    setSuccess('')
+    setTestingEmailEmpresaId(String(empresa.id))
+    try {
+      await sendCompanyTestEmail(empresa.id)
+      setSuccess(`Correo de prueba enviado a ${empresa.email.trim()}.`)
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : 'No se pudo enviar el correo de prueba.')
+    } finally {
+      setTestingEmailEmpresaId(null)
     }
   }
 
@@ -634,6 +754,7 @@ export default function Empresas() {
         ? `El pago se guardó, pero no se pudo actualizar la empresa a VIGENTE: ${details}`
         : `No fue posible registrar el pago: ${details}`)
     } finally {
+      if (paymentSaved) window.dispatchEvent(new Event(PAYMENTS_UPDATED_EVENT))
       setIsSavingPago(false)
     }
   }
@@ -701,6 +822,7 @@ export default function Empresas() {
         comision_tarjeta: comisionTarjetaEditada,
         voucher_url: voucherUrl,
       })
+      window.dispatchEvent(new Event(PAYMENTS_UPDATED_EVENT))
       if (voucherEditFile && editingPago.voucher_url) {
         await deleteVoucherByPublicUrl(editingPago.voucher_url)
       }
@@ -721,6 +843,34 @@ export default function Empresas() {
       setError(updateError instanceof Error ? updateError.message : 'No fue posible actualizar el pago.')
     } finally {
       setIsSavingPago(false)
+    }
+  }
+
+  async function handleDeletePago() {
+    if (pagoToDelete?.id === undefined || deletePagoConfirmation !== 'Eliminar' || isDeletingPago) return
+
+    setIsDeletingPago(true)
+    setDeletePagoError('')
+    try {
+      await empresaService.deletePago(pagoToDelete.id)
+      if (pagoToDelete.voucher_url) await deleteVoucherByPublicUrl(pagoToDelete.voucher_url)
+
+      const updatedPayments = (selectedEmpresa?.pagos ?? []).filter((pago) => pago.id !== pagoToDelete.id)
+      if (selectedEmpresa) setSelectedEmpresa({ ...selectedEmpresa, pagos: updatedPayments })
+      setEmpresas((current) => current.map((empresa) =>
+        empresa.id === selectedEmpresa?.id
+          ? { ...empresa, pagos: (empresa.pagos ?? []).filter((pago) => pago.id !== pagoToDelete.id) }
+          : empresa,
+      ))
+      window.dispatchEvent(new Event(PAYMENTS_UPDATED_EVENT))
+      setPagoToDelete(null)
+      setDeletePagoConfirmation('')
+      setSuccess('Pago eliminado correctamente.')
+    } catch (deletePaymentError) {
+      console.error('No se pudo eliminar el pago:', deletePaymentError)
+      setDeletePagoError(deletePaymentError instanceof Error ? deletePaymentError.message : 'No se pudo eliminar el pago.')
+    } finally {
+      setIsDeletingPago(false)
     }
   }
 
@@ -797,6 +947,7 @@ export default function Empresas() {
       ])
 
       const deletedName = empresaToDelete.nombre
+      window.dispatchEvent(new Event(EMPRESAS_UPDATED_EVENT))
       setEmpresaToDelete(null)
       setDeleteConfirmation('')
       setSuccess(`Empresa ${deletedName} eliminada correctamente.`)
@@ -832,10 +983,39 @@ export default function Empresas() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
+      {activeFilterPopover && filterPopoverPosition && createPortal(
+        <div
+          ref={filterPopoverRef}
+          role="menu"
+          aria-label={activeFilterPopover === 'estado' ? 'Filtrar por estado' : 'Filtrar por vencimiento'}
+          style={{ top: filterPopoverPosition.top, left: filterPopoverPosition.left }}
+          className="fixed z-[100] w-64 max-w-[calc(100vw-1rem)] rounded-lg border border-slate-200 bg-white p-2 shadow-xl shadow-slate-900/15"
+        >
+          {filterOptions.map((option) => {
+            const isSelected = activeFilterPopover === 'estado'
+              ? estadoEmpresaFilter === option.value
+              : vencimientoFilter === option.value
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="menuitemradio"
+                aria-checked={isSelected}
+                onClick={() => selectFilterOption(option.value)}
+                className={`flex min-h-10 w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm transition ${isSelected ? 'bg-primary-50 font-semibold text-primary-700' : 'text-slate-700 hover:bg-slate-50'}`}
+              >
+                {option.label}
+                {isSelected && <CheckCircle2 size={15} aria-hidden="true" />}
+              </button>
+            )
+          })}
+        </div>,
+        document.body,
+      )}
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="mb-2 text-sm font-semibold text-primary-600">Administración comercial</p>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Empresas</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Clientes(Empresas)</h1>
           <p className="mt-2 text-sm text-slate-500 sm:text-base">
             Centraliza los datos de tus empresas y consulta su control de pagos.
           </p>
@@ -913,6 +1093,47 @@ export default function Empresas() {
                 </button>
               </div>
             )}
+
+            {pagoToDelete && (
+              <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-[2px]">
+                <section role="alertdialog" aria-modal="true" aria-labelledby="delete-payment-title" aria-describedby="delete-payment-warning" className="my-auto w-full max-w-lg overflow-hidden rounded-xl border border-rose-100 bg-white shadow-2xl shadow-slate-950/25">
+                  <div className="border-b border-slate-100 px-6 py-5">
+                    <div className="flex items-start gap-3">
+                      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-700"><Trash2 size={19} /></span>
+                      <div>
+                        <h2 id="delete-payment-title" className="text-lg font-semibold text-slate-900">Eliminar pago</h2>
+                        <p className="mt-1 text-sm text-slate-600">{formatDate(pagoToDelete.fecha_pago)}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-4 px-6 py-5">
+                    <p id="delete-payment-warning" className="text-sm leading-6 text-slate-700">
+                      Si elimina el pago, perderá toda la información relacionada con este.
+                    </p>
+                    <div>
+                      <label htmlFor="delete-payment-confirmation" className="mb-1.5 block text-sm font-medium text-slate-700">Escribe Eliminar para confirmar</label>
+                      <input
+                        id="delete-payment-confirmation"
+                        type="text"
+                        autoComplete="off"
+                        value={deletePagoConfirmation}
+                        onChange={(event) => setDeletePagoConfirmation(event.target.value)}
+                        disabled={isDeletingPago}
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 disabled:bg-slate-50"
+                      />
+                    </div>
+                    {deletePagoError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{deletePagoError}</p>}
+                  </div>
+                  <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-6 py-4 sm:flex-row sm:justify-end">
+                    <button type="button" onClick={() => { setPagoToDelete(null); setDeletePagoConfirmation(''); setDeletePagoError('') }} disabled={isDeletingPago} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
+                    <button type="button" onClick={() => void handleDeletePago()} disabled={isDeletingPago || deletePagoConfirmation !== 'Eliminar'} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50">
+                      {isDeletingPago ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                      {isDeletingPago ? 'Eliminando...' : 'Eliminar pago'}
+                    </button>
+                  </div>
+                </section>
+              </div>
+            )}
           </div>
           <button
             type="button"
@@ -979,9 +1200,40 @@ export default function Empresas() {
                   <th scope="col" className="px-4 py-3">Dirección</th>
                   <th scope="col" className="px-4 py-3">Representante legal / RUT</th>
                   <th scope="col" className="px-4 py-3">Contacto</th>
+                  <th scope="col" className="px-4 py-3">Correo electrónico</th>
                   <th scope="col" className="px-4 py-3">Frecuencia</th>
-                  <th scope="col" className="px-4 py-3">Próximo pago</th>
-                  <th scope="col" className="px-4 py-3">Vigencia</th>
+                  <th scope="col" className="px-4 py-3">
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      <span>Próximo pago</span>
+                      <button
+                        ref={dueFilterTriggerRef}
+                        type="button"
+                        onClick={(event) => toggleFilterPopover('vencimiento', event.currentTarget)}
+                        aria-label="Filtrar por semáforo de pagos"
+                        aria-haspopup="menu"
+                        aria-expanded={activeFilterPopover === 'vencimiento'}
+                        className={`inline-flex size-7 items-center justify-center gap-0.5 rounded-md transition ${vencimientoFilter !== 'TODOS' ? 'bg-primary-100 text-primary-700' : 'text-slate-500 hover:bg-slate-200'}`}
+                      >
+                        <Filter size={13} /><ChevronDown size={12} />
+                      </button>
+                    </div>
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      <span>Vigencia</span>
+                      <button
+                        ref={statusFilterTriggerRef}
+                        type="button"
+                        onClick={(event) => toggleFilterPopover('estado', event.currentTarget)}
+                        aria-label="Filtrar por estado de empresa"
+                        aria-haspopup="menu"
+                        aria-expanded={activeFilterPopover === 'estado'}
+                        className={`inline-flex size-7 items-center justify-center gap-0.5 rounded-md transition ${estadoEmpresaFilter !== 'TODAS' ? 'bg-primary-100 text-primary-700' : 'text-slate-500 hover:bg-slate-200'}`}
+                      >
+                        <Filter size={13} /><ChevronDown size={12} />
+                      </button>
+                    </div>
+                  </th>
                   <th scope="col" className="px-5 py-3 text-right sm:px-6">Acciones</th>
                 </tr>
               </thead>
@@ -989,6 +1241,7 @@ export default function Empresas() {
                 {filteredEmpresas.map((empresa) => {
                   const vigente = isVigente(empresa.estado)
                   const desvinculada = isDesvinculada(empresa.estado)
+                  const isTestingEmail = testingEmailEmpresaId === String(empresa.id)
                   const nextPaymentDate = getLatestNextPayment(empresa.pagos)
                   const paymentDueStatus = getPaymentDueStatus(nextPaymentDate)
                   const vigenciaClasses = desvinculada
@@ -1032,6 +1285,7 @@ export default function Empresas() {
                         <p className="mt-0.5 text-xs text-slate-500">RUT {empresa.rut_representante}</p>
                       </td>
                       <td className="px-4 py-4 text-sm text-slate-600">{empresa.contacto}</td>
+                      <td className="px-4 py-4 text-sm text-slate-600">{empresa.email || '—'}</td>
                       <td className="px-4 py-4">
                         <span className="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600">
                           {empresa.frecuencia ? empresa.frecuencia.toLocaleUpperCase('es-CL') : '—'}
@@ -1051,6 +1305,16 @@ export default function Empresas() {
                       </td>
                       <td className="px-5 py-4 text-right sm:px-6">
                         <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            disabled={empresa.id === undefined || empresa.estado !== 'VIGENTE' || !empresa.email?.trim() || testingEmailEmpresaId !== null}
+                            onClick={() => void handleTestEmail(empresa)}
+                            className="inline-flex size-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-40"
+                            aria-label={`Enviar correo de prueba a ${empresa.nombre}`}
+                            title={empresa.estado !== 'VIGENTE' ? 'Sólo disponible para empresas VIGENTES' : !empresa.email?.trim() ? 'La empresa no tiene un correo registrado' : 'Enviar correo de prueba'}
+                          >
+                            {isTestingEmail ? <LoaderCircle size={16} className="animate-spin" /> : <Send size={16} />}
+                          </button>
                           <button
                             type="button"
                             onClick={() => openEditEmpresa(empresa)}
@@ -1155,6 +1419,7 @@ export default function Empresas() {
                 <TextField id="empresa-representante" label="Representante legal" value={empresaForm.representante_legal} onChange={(value) => updateEmpresaField('representante_legal', value)} />
                 <TextField id="empresa-rut-representante" label="RUT del representante" value={empresaForm.rut_representante} onChange={(value) => updateEmpresaField('rut_representante', value)} placeholder="12.345.678-9" />
                 <TextField id="empresa-contacto" label="Contacto (correo o teléfono)" value={empresaForm.contacto} onChange={(value) => updateEmpresaField('contacto', value)} placeholder="contacto@empresa.cl" />
+                <TextField id="empresa-email" label="Correo electrónico" type="email" required={false} value={empresaForm.email} onChange={(value) => updateEmpresaField('email', value)} placeholder="correo@empresa.cl" />
                 <div>
                   <label htmlFor="empresa-frecuencia" className="mb-1.5 block text-sm font-medium text-slate-700">Frecuencia de pago</label>
                   <select id="empresa-frecuencia" value={empresaForm.frecuencia} onChange={(event) => updateEmpresaField('frecuencia', event.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100">
@@ -1359,15 +1624,31 @@ export default function Empresas() {
                               ) : <span className="text-xs text-slate-400">—</span>}
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <button
-                                type="button"
-                                onClick={() => openEditPago(pago)}
-                                aria-label={`Editar pago del ${formatDate(pago.fecha_pago)}`}
-                                title="Editar pago"
-                                className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700"
-                              >
-                                <Edit2 size={15} />
-                              </button>
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditPago(pago)}
+                                  aria-label={`Editar pago del ${formatDate(pago.fecha_pago)}`}
+                                  title="Editar pago"
+                                  className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700"
+                                >
+                                  <Edit2 size={15} />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={pago.id === undefined}
+                                  onClick={() => {
+                                    setPagoToDelete(pago)
+                                    setDeletePagoConfirmation('')
+                                    setDeletePagoError('')
+                                  }}
+                                  aria-label={`Eliminar pago del ${formatDate(pago.fecha_pago)}`}
+                                  title="Eliminar pago"
+                                  className="inline-flex size-8 items-center justify-center rounded-lg border border-rose-200 text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}

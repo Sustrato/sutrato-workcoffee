@@ -179,4 +179,16 @@ export const empresaService = {
     if (error) throw new Error(`Error al actualizar pago: ${error.message}`)
     return data
   },
+
+  deletePago: async (id: string | number) => {
+    const { data, error } = await supabase
+      .from('pagos')
+      .delete()
+      .eq('id', id)
+      .select('id')
+      .single()
+
+    if (error) throw new Error(`No se pudo eliminar el pago: ${error.message}`)
+    return data
+  },
 }

@@ -11,6 +11,7 @@ const ContratoEditor = lazy(() => import('./pages/ContratoEditor'))
 const Contratos = lazy(() => import('./pages/Contratos'))
 const HistorialSII = lazy(() => import('./pages/HistorialSII'))
 const PlantillaContrato = lazy(() => import('./pages/PlantillaContrato'))
+const Reportes = lazy(() => import('./pages/Reportes'))
 
 function App() {
   return (
@@ -26,9 +27,8 @@ function App() {
           <Route path="/contratos" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando contratos...</p>}><Contratos /></Suspense>} />
           <Route path="/contratos/:id" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando editor...</p>}><ContratoEditor /></Suspense>} />
           <Route path="/historial-sii" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando Historial SII...</p>}><HistorialSII /></Suspense>} />
+          <Route path="/reportes" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando reportes...</p>}><Reportes /></Suspense>} />
           <Route path="/configuracion/plantilla-contrato" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando plantilla...</p>}><PlantillaContrato /></Suspense>} />
-          <Route path="/categorias" element={<></>} />
-          <Route path="/historial" element={<></>} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

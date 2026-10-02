@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { ArrowRight, LockKeyhole, LoaderCircle, Mail, ShieldCheck } from 'lucide-react'
+import { ArrowRight, Eye, EyeOff, LockKeyhole, LoaderCircle, Mail, ShieldCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import { supabase } from '../services/supabase'
@@ -8,6 +8,7 @@ export default function Login() {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
@@ -51,19 +52,19 @@ export default function Login() {
             </div>
             <div>
               <p className="text-base font-bold tracking-tight">Sutrato WorkCoffee</p>
-              <p className="text-xs text-blue-100">Gestión de planillas</p>
+              <p className="text-xs text-blue-100">Gestión Administrativa</p>
             </div>
           </div>
 
           <div className="my-12 max-w-md">
             <p className="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-blue-200">
-              Todo en un lugar
+              PLATAFORMA INTEGRAL DE GESTIÓN
             </p>
             <h1 className="text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
-              Crea tus planillas de forma automatizada, sin perder tiempo.
+              Control Administrativo y Financiero
             </h1>
             <p className="mt-5 max-w-sm text-sm leading-6 text-blue-100 sm:text-base">
-              Crea y consulta planillas, organiza y accede a tus archivos desde un solo espacio.
+              Controla empresas, contratos, flujos mensuales, anuales y reportes gerenciales desde un solo lugar.
             </p>
           </div>
 
@@ -78,7 +79,7 @@ export default function Login() {
             <div className="mb-8">
               <h2 className="text-2xl font-bold tracking-tight text-slate-900">Iniciar sesión</h2>
               <p className="mt-2 text-sm leading-6 text-slate-500">
-                Ingresa tus credenciales para acceder a tus planillas.
+                Ingresa tus credenciales para acceder.
               </p>
             </div>
 
@@ -113,15 +114,25 @@ export default function Login() {
                   <input
                     id="password"
                     name="password"
-                    type="password"
+                    type={isPasswordVisible ? 'text' : 'password'}
                     autoComplete="current-password"
                     required
                     disabled={isSubmitting}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     placeholder="Ingresa tu contraseña"
-                    className="h-11 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+                    className="h-11 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-11 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setIsPasswordVisible((visible) => !visible)}
+                    disabled={isSubmitting}
+                    aria-label={isPasswordVisible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    aria-pressed={isPasswordVisible}
+                    className="absolute right-2 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {isPasswordVisible ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
                 </div>
               </div>
 
