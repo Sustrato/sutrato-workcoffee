@@ -95,7 +95,7 @@ export default function MainLayout() {
           />
           <div>
             <p className="text-sm font-bold tracking-tight text-slate-900">Sutrato WorkCoffee</p>
-            <p className="text-xs text-slate-500">Gestión de Planillas</p>
+            <p className="text-xs text-slate-500">Gestor Administrativo y Financiero</p>
           </div>
         </div>
 
@@ -212,7 +212,29 @@ export default function MainLayout() {
           </div>
         </header>
 
-        <main className="min-h-[calc(100vh-5rem)] p-4 sm:p-8 print:min-h-0 print:p-0">
+        <nav aria-label="Navegación principal" className="sticky top-20 z-20 border-b border-slate-200 bg-white px-4 py-2 md:hidden print:hidden">
+          <div className="flex min-w-0 gap-1 overflow-x-auto">
+            {navigation.map(({ label, to, icon: Icon, end }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className={({ isActive }) =>
+                  `inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                    isActive
+                      ? 'bg-primary-50 text-primary-700'
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`
+                }
+              >
+                <Icon size={16} />
+                {label}
+              </NavLink>
+            ))}
+          </div>
+        </nav>
+
+        <main className="min-h-[calc(100vh-5rem)] min-w-0 p-4 sm:p-8 print:min-h-0 print:p-0">
           <Outlet />
         </main>
       </div>

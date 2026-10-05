@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 
 const SII_NOTICES_BUCKET = 'avisos-sii'
+const SII_RESPONSE_STORAGE_PREFIX = `/storage/v1/object/public/${SII_NOTICES_BUCKET}/`
 export const EMPRESAS_UPDATED_EVENT = 'sutrato:empresas-updated'
 
 export interface SiiNoticeRecord {
@@ -46,6 +47,52 @@ export async function uploadSiiNoticeResponse(noticeId: string, file: File): Pro
   }
 
   return responseUrl
+}
+
+export async function deleteSiiNoticeResponse(notice: SiiNoticeRecord): Promise<void> {
+  if (!notice.respuesta_sii_url) throw new Error('El aviso no tiene una respuesta del SII para eliminar.')
+
+  let storagePath: string
+  try {
+    const responseUrl = new URL(notice.respuesta_sii_url)
+    const prefixIndex = responseUrl.pathname.indexOf(SII_RESPONSE_STORAGE_PREFIX)
+    if (prefixIndex < 0) throw new Error('La URL no pertenece al almacenamiento de respuestas SII.')
+    storagePath = decodeURIComponent(responseUrl.pathname.slice(prefixIndex + SII_RESPONSE_STORAGE_PREFIX.length))
+  } catch (pathError) {
+    throw new Error(`No se pudo identificar el archivo de respuesta en Storage: ${pathError instanceof Error ? pathError.message : 'URL inválida.'}`)
+  }
+
+  if (!storagePath.startsWith(`respuestas/${notice.id}/`) || storagePath.split('/').some((segment) => segment === '..')) {
+    throw new Error('La ruta del archivo de respuesta no corresponde al aviso seleccionado.')
+  }
+
+  const { data: updatedNotice, error: updateError } = await supabase
+    .from('avisos_sii_historial')
+    .update({ respuesta_sii_url: null })
+    .eq('id', notice.id)
+    .eq('respuesta_sii_url', notice.respuesta_sii_url)
+    .select('id')
+
+  if (updateError || (updatedNotice ?? []).length !== 1) {
+    throw new Error(`No se pudo eliminar el registro de respuesta: ${updateError?.message ?? 'La respuesta cambió o el aviso ya no existe.'}`)
+  }
+
+  const { error: storageError } = await supabase.storage
+    .from(SII_NOTICES_BUCKET)
+    .remove([storagePath])
+
+  if (storageError) {
+    const { error: restoreError } = await supabase
+      .from('avisos_sii_historial')
+      .update({ respuesta_sii_url: notice.respuesta_sii_url })
+      .eq('id', notice.id)
+      .is('respuesta_sii_url', null)
+
+    if (restoreError) {
+      throw new Error(`No se pudo eliminar el archivo de Storage (${storageError.message}) ni restaurar el registro (${restoreError.message}).`)
+    }
+    throw new Error(`No se pudo eliminar el archivo de respuesta en Storage: ${storageError.message}`)
+  }
 }
 
 export async function saveSiiNotice(

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ExternalLink, FileText, FileUp, LoaderCircle } from 'lucide-react'
-import { getSiiNoticeHistory, type SiiNoticeRecord, uploadSiiNoticeResponse } from '../services/siiNotices'
+import { ExternalLink, FileText, FileUp, LoaderCircle, Trash2, X } from 'lucide-react'
+import { deleteSiiNoticeResponse, getSiiNoticeHistory, type SiiNoticeRecord, uploadSiiNoticeResponse } from '../services/siiNotices'
 
 function formatCreatedAt(value: string): string {
   return new Intl.DateTimeFormat('es-CL', {
@@ -13,6 +13,10 @@ export default function HistorialSII() {
   const [notices, setNotices] = useState<SiiNoticeRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [uploadingNoticeId, setUploadingNoticeId] = useState<string | null>(null)
+  const [noticeToDeleteResponse, setNoticeToDeleteResponse] = useState<SiiNoticeRecord | null>(null)
+  const [deleteConfirmation, setDeleteConfirmation] = useState('')
+  const [isDeletingResponse, setIsDeletingResponse] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -39,6 +43,26 @@ export default function HistorialSII() {
       setError(uploadError instanceof Error ? uploadError.message : 'No se pudo subir la respuesta del SII.')
     } finally {
       setUploadingNoticeId(null)
+    }
+  }
+
+  async function handleResponseDelete() {
+    if (!noticeToDeleteResponse || deleteConfirmation !== 'Eliminar' || isDeletingResponse) return
+    setIsDeletingResponse(true)
+    setDeleteError('')
+    setError('')
+    try {
+      await deleteSiiNoticeResponse(noticeToDeleteResponse)
+      setNotices((current) => current.map((item) =>
+        item.id === noticeToDeleteResponse.id ? { ...item, respuesta_sii_url: null } : item,
+      ))
+      setNoticeToDeleteResponse(null)
+      setDeleteConfirmation('')
+    } catch (deleteResponseError) {
+      console.error('No se pudo eliminar la respuesta del SII:', deleteResponseError)
+      setDeleteError(deleteResponseError instanceof Error ? deleteResponseError.message : 'No se pudo eliminar la respuesta del SII.')
+    } finally {
+      setIsDeletingResponse(false)
     }
   }
 
@@ -76,9 +100,23 @@ export default function HistorialSII() {
                     </td>
                     <td className="px-5 py-4 text-right">
                       {notice.respuesta_sii_url ? (
-                        <a href={notice.respuesta_sii_url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700">
-                          <ExternalLink size={15} /> Ver / descargar
-                        </a>
+                        <div className="flex justify-end gap-2">
+                          <a href={notice.respuesta_sii_url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700">
+                            <ExternalLink size={15} /> Ver / descargar
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNoticeToDeleteResponse(notice)
+                              setDeleteConfirmation('')
+                              setDeleteError('')
+                            }}
+                            disabled={uploadingNoticeId !== null || isDeletingResponse}
+                            className="inline-flex h-9 items-center gap-2 rounded-md border border-rose-200 px-3 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Trash2 size={15} /> Eliminar respuesta
+                          </button>
+                        </div>
                       ) : (
                         <div className="flex justify-end">
                           <input
@@ -106,6 +144,48 @@ export default function HistorialSII() {
           </div>
         )}
       </section>
+
+      {noticeToDeleteResponse && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-[2px]">
+          <section role="alertdialog" aria-modal="true" aria-labelledby="delete-sii-response-title" aria-describedby="delete-sii-response-warning" className="my-auto w-full max-w-lg overflow-hidden rounded-xl border border-rose-100 bg-white shadow-2xl shadow-slate-950/25">
+            <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5">
+              <div className="flex items-start gap-3">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-700"><Trash2 size={19} /></span>
+                <div>
+                  <h2 id="delete-sii-response-title" className="text-lg font-semibold text-slate-900">Eliminar respuesta SII</h2>
+                  <p className="mt-1 text-sm text-slate-600">{noticeToDeleteResponse.nombre_archivo}</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => { setNoticeToDeleteResponse(null); setDeleteConfirmation(''); setDeleteError('') }} disabled={isDeletingResponse} aria-label="Cerrar confirmación" className="flex size-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50">
+                <X size={19} />
+              </button>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <p id="delete-sii-response-warning" className="text-sm leading-6 text-slate-700">Esta acción eliminará la respuesta del SII y su archivo almacenado.</p>
+              <div>
+                <label htmlFor="delete-sii-response-confirmation" className="mb-1.5 block text-sm font-medium text-slate-700">Escribe Eliminar para confirmar</label>
+                <input
+                  id="delete-sii-response-confirmation"
+                  type="text"
+                  autoComplete="off"
+                  value={deleteConfirmation}
+                  onChange={(event) => setDeleteConfirmation(event.target.value)}
+                  disabled={isDeletingResponse}
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 disabled:bg-slate-50"
+                />
+              </div>
+              {deleteError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{deleteError}</p>}
+            </div>
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-6 py-4 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => { setNoticeToDeleteResponse(null); setDeleteConfirmation(''); setDeleteError('') }} disabled={isDeletingResponse} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
+              <button type="button" onClick={() => void handleResponseDelete()} disabled={isDeletingResponse || deleteConfirmation !== 'Eliminar'} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50">
+                {isDeletingResponse ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                {isDeletingResponse ? 'Eliminando...' : 'Eliminar definitivamente'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

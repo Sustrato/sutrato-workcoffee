@@ -1,2 +1,5 @@
 [functions.send-payment-reminders]
 verify_jwt = true
+
+[functions.trusted-device-auth]
+verify_jwt = false

@@ -1094,46 +1094,6 @@ export default function Empresas() {
               </div>
             )}
 
-            {pagoToDelete && (
-              <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-[2px]">
-                <section role="alertdialog" aria-modal="true" aria-labelledby="delete-payment-title" aria-describedby="delete-payment-warning" className="my-auto w-full max-w-lg overflow-hidden rounded-xl border border-rose-100 bg-white shadow-2xl shadow-slate-950/25">
-                  <div className="border-b border-slate-100 px-6 py-5">
-                    <div className="flex items-start gap-3">
-                      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-700"><Trash2 size={19} /></span>
-                      <div>
-                        <h2 id="delete-payment-title" className="text-lg font-semibold text-slate-900">Eliminar pago</h2>
-                        <p className="mt-1 text-sm text-slate-600">{formatDate(pagoToDelete.fecha_pago)}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-4 px-6 py-5">
-                    <p id="delete-payment-warning" className="text-sm leading-6 text-slate-700">
-                      Si elimina el pago, perderá toda la información relacionada con este.
-                    </p>
-                    <div>
-                      <label htmlFor="delete-payment-confirmation" className="mb-1.5 block text-sm font-medium text-slate-700">Escribe Eliminar para confirmar</label>
-                      <input
-                        id="delete-payment-confirmation"
-                        type="text"
-                        autoComplete="off"
-                        value={deletePagoConfirmation}
-                        onChange={(event) => setDeletePagoConfirmation(event.target.value)}
-                        disabled={isDeletingPago}
-                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 disabled:bg-slate-50"
-                      />
-                    </div>
-                    {deletePagoError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{deletePagoError}</p>}
-                  </div>
-                  <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-6 py-4 sm:flex-row sm:justify-end">
-                    <button type="button" onClick={() => { setPagoToDelete(null); setDeletePagoConfirmation(''); setDeletePagoError('') }} disabled={isDeletingPago} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
-                    <button type="button" onClick={() => void handleDeletePago()} disabled={isDeletingPago || deletePagoConfirmation !== 'Eliminar'} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50">
-                      {isDeletingPago ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                      {isDeletingPago ? 'Eliminando...' : 'Eliminar pago'}
-                    </button>
-                  </div>
-                </section>
-              </div>
-            )}
           </div>
           <button
             type="button"
@@ -1145,6 +1105,47 @@ export default function Empresas() {
           </button>
         </div>
       </section>
+
+      {pagoToDelete && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-[2px]">
+          <section role="alertdialog" aria-modal="true" aria-labelledby="delete-payment-title" aria-describedby="delete-payment-warning" className="my-auto w-full max-w-lg overflow-hidden rounded-xl border border-rose-100 bg-white shadow-2xl shadow-slate-950/25">
+            <div className="border-b border-slate-100 px-4 py-5 sm:px-6">
+              <div className="flex items-start gap-3">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-700"><Trash2 size={19} /></span>
+                <div>
+                  <h2 id="delete-payment-title" className="text-lg font-semibold text-slate-900">Eliminar pago</h2>
+                  <p className="mt-1 text-sm text-slate-600">{formatDate(pagoToDelete.fecha_pago)}</p>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-4 px-4 py-5 sm:px-6">
+              <p id="delete-payment-warning" className="text-sm leading-6 text-slate-700">
+                Si elimina el pago, perderá toda la información relacionada con este.
+              </p>
+              <div>
+                <label htmlFor="delete-payment-confirmation" className="mb-1.5 block text-sm font-medium text-slate-700">Escribe ELIMINAR para confirmar</label>
+                <input
+                  id="delete-payment-confirmation"
+                  type="text"
+                  autoComplete="off"
+                  value={deletePagoConfirmation}
+                  onChange={(event) => setDeletePagoConfirmation(event.target.value)}
+                  disabled={isDeletingPago}
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 disabled:bg-slate-50"
+                />
+              </div>
+              {deletePagoError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{deletePagoError}</p>}
+            </div>
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-4 py-4 sm:flex-row sm:justify-end sm:px-6">
+              <button type="button" onClick={() => { setPagoToDelete(null); setDeletePagoConfirmation(''); setDeletePagoError('') }} disabled={isDeletingPago} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
+              <button type="button" onClick={() => void handleDeletePago()} disabled={isDeletingPago || deletePagoConfirmation !== 'Eliminar'} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50">
+                {isDeletingPago ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                {isDeletingPago ? 'Eliminando...' : 'Eliminar pago'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {(error || success) && (
         <div
@@ -1542,7 +1543,7 @@ export default function Empresas() {
             </div>
             <div className="space-y-4 px-6 py-5">
               <p id="delete-company-warning" className="text-sm leading-6 text-slate-700">
-                Esta acción es irreversible. También puede afectar sus pagos, comprobantes, contratos e historial relacionados. Si alguna relación de la base de datos impide eliminarla, Supabase cancelará la operación y verás el error.
+                ATENCIÓN: Esta acción no se puede deshacer y borrará toda la información vinculada a la empresa.
               </p>
               <div>
                 <label htmlFor="delete-company-confirmation" className="mb-1.5 block text-sm font-medium text-slate-700">Escribe ELIMINAR para confirmar</label>
@@ -1758,7 +1759,7 @@ export default function Empresas() {
                   )}
                   <p className="mt-1 text-xs text-slate-400">Formatos permitidos: PNG, JPG o PDF.</p>
                 </div>
-                <div className="grid gap-3 rounded-xl border border-primary-100 bg-primary-50/60 p-4 sm:grid-cols-5">
+                <div className="grid gap-3 rounded-xl border border-primary-100 bg-primary-50/60 p-4 sm:grid-cols-2 lg:grid-cols-5">
                   <div>
                     <p className="text-xs font-medium text-slate-500">Monto bruto</p>
                     <p className="mt-1 text-base font-semibold text-slate-800">{formatMoney(bruto)}</p>
@@ -1890,7 +1891,7 @@ export default function Empresas() {
                 const editNeto = Math.round((editBruto / 1.19) * 100) / 100
                 const editIva = Math.round((editBruto - editNeto) * 100) / 100
                 return (
-                  <div className="grid grid-cols-2 gap-3 rounded-xl border border-primary-100 bg-primary-50/60 p-4 sm:grid-cols-5">
+                  <div className="grid gap-3 rounded-xl border border-primary-100 bg-primary-50/60 p-4 sm:grid-cols-2 lg:grid-cols-5">
                     <div><p className="text-xs text-slate-500">Bruto</p><p className="mt-1 text-sm font-semibold text-slate-800">{formatMoney(editBruto)}</p></div>
                     <div><p className="text-xs text-slate-500">Neto</p><p className="mt-1 text-sm font-semibold text-slate-800">{formatMoney(editNeto)}</p></div>
                     <div><p className="text-xs text-slate-500">IVA (19%)</p><p className="mt-1 text-sm font-bold text-primary-700">{formatMoney(editIva)}</p></div>

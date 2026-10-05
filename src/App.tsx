@@ -6,6 +6,7 @@ import DetalleDocumento from './pages/DetalleDocumento'
 import Empresas from './pages/Empresas'
 import Login from './pages/Login'
 import NoVigentes from './pages/NoVigentes'; //
+import TrustedDeviceGate from './layouts/TrustedDeviceGate'
 
 const ContratoEditor = lazy(() => import('./pages/ContratoEditor'))
 const Contratos = lazy(() => import('./pages/Contratos'))
@@ -19,16 +20,18 @@ function App() {
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/login" element={<Login />} />
-        <Route element={<MainLayout />}>
-        <Route path="/no-vigentes" element={<NoVigentes />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/documentos" element={<Empresas />} />
-          <Route path="/documentos/:id" element={<DetalleDocumento />} />
-          <Route path="/contratos" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando contratos...</p>}><Contratos /></Suspense>} />
-          <Route path="/contratos/:id" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando editor...</p>}><ContratoEditor /></Suspense>} />
-          <Route path="/historial-sii" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando Historial SII...</p>}><HistorialSII /></Suspense>} />
-          <Route path="/reportes" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando reportes...</p>}><Reportes /></Suspense>} />
-          <Route path="/configuracion/plantilla-contrato" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando plantilla...</p>}><PlantillaContrato /></Suspense>} />
+        <Route element={<TrustedDeviceGate />}>
+          <Route element={<MainLayout />}>
+            <Route path="/no-vigentes" element={<NoVigentes />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/documentos" element={<Empresas />} />
+            <Route path="/documentos/:id" element={<DetalleDocumento />} />
+            <Route path="/contratos" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando contratos...</p>}><Contratos /></Suspense>} />
+            <Route path="/contratos/:id" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando editor...</p>}><ContratoEditor /></Suspense>} />
+            <Route path="/historial-sii" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando Historial SII...</p>}><HistorialSII /></Suspense>} />
+            <Route path="/reportes" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando reportes...</p>}><Reportes /></Suspense>} />
+            <Route path="/configuracion/plantilla-contrato" element={<Suspense fallback={<p className="text-sm text-slate-500">Cargando plantilla...</p>}><PlantillaContrato /></Suspense>} />
+          </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
