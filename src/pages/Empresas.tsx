@@ -48,6 +48,7 @@ interface Pago {
   comision_tarjeta?: number | null
   proximo_pago?: string
   voucher_url?: string | null
+  factura_url?: string | null // <-- Casilla añadida para la factura
 }
 
 type CsvExportOption = 'completo' | 'empresas' | 'pagos'
@@ -125,7 +126,6 @@ function formatDate(value?: string): string {
   if (!value) return '—'
   const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00`) : new Date(value)
   if (Number.isNaN(date.getTime())) return value
-
   return new Intl.DateTimeFormat('es-CL', {
     day: 'numeric',
     month: 'short',
@@ -137,7 +137,6 @@ function getNextPaymentDate(frequency: string, startDate: string): string {
   if (!startDate) return ''
   const [year, month, day] = startDate.split('-').map(Number)
   if (!year || !month || !day) return ''
-
   const normalizedFrequency = frequency.trim().toLocaleLowerCase('es-CL')
   if (normalizedFrequency === 'mensual') {
     const cutoffMonth = day < 5 ? month - 1 : month
@@ -155,7 +154,6 @@ function getDefaultPaymentAmount(frequency: string, transactionDate: string): st
     const monthlyRate = 15000
     const dayOfMonth = Number(transactionDate.slice(8, 10))
     if (dayOfMonth === 5) return String(monthlyRate)
-
     const nextPaymentDate = getNextPaymentDate(frequency, transactionDate)
     const startTimestamp = new Date(`${transactionDate}T00:00:00Z`).getTime()
     const cutoffTimestamp = new Date(`${nextPaymentDate}T00:00:00Z`).getTime()
@@ -178,15 +176,12 @@ function getPaymentDueStatus(nextPaymentDate?: string): {
   label: string
 } {
   if (!nextPaymentDate) return { color: 'neutral', label: 'Sin fecha' }
-
   const [year, month, day] = nextPaymentDate.slice(0, 10).split('-').map(Number)
   if (!year || !month || !day) return { color: 'neutral', label: 'Sin fecha' }
-
   const today = new Date()
   const todayTimestamp = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
   const dueTimestamp = Date.UTC(year, month - 1, day)
   const daysUntilDue = Math.round((dueTimestamp - todayTimestamp) / 86_400_000)
-
   if (daysUntilDue < 0) {
     const overdueDays = Math.abs(daysUntilDue)
     return { color: 'red', label: `Atrasado por ${overdueDays} ${overdueDays === 1 ? 'día' : 'días'}` }
@@ -303,6 +298,7 @@ export default function Empresas() {
   const [isImportingCsv, setIsImportingCsv] = useState(false)
   const importCsvInputRef = useRef<HTMLInputElement>(null)
   const voucherInputRef = useRef<HTMLInputElement>(null)
+  const facturaInputRef = useRef<HTMLInputElement>(null) // <-- Ref para la factura
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [estadoEmpresaFilter, setEstadoEmpresaFilter] = useState<EstadoEmpresaFilter>('TODAS')
@@ -327,9 +323,12 @@ export default function Empresas() {
   const [deletePagoError, setDeletePagoError] = useState('')
   const [pagoEditForm, setPagoEditForm] = useState<PagoEditFormData>({ fecha_pago: '', proximo_pago: '', forma_pago: 'Transferencia', bruto: '', monto_liquido: '' })
   const [voucherEditFile, setVoucherEditFile] = useState<File | null>(null)
+  const [facturaEditFile, setFacturaEditFile] = useState<File | null>(null) // <-- Estado para factura al editar
   const voucherEditInputRef = useRef<HTMLInputElement>(null)
+  const facturaEditInputRef = useRef<HTMLInputElement>(null) // <-- Ref para editar factura
   const [pagoForm, setPagoForm] = useState<PagoFormData>(EMPTY_PAGO)
   const [voucherFile, setVoucherFile] = useState<File | null>(null)
+  const [facturaFile, setFacturaFile] = useState<File | null>(null) // <-- Archivo de factura seleccionada
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -347,7 +346,6 @@ export default function Empresas() {
 
   useEffect(() => {
     let isMounted = true
-
     empresaService.getEmpresas()
       .then((data) => {
         if (isMounted) setEmpresas(data as Empresa[])
@@ -359,7 +357,6 @@ export default function Empresas() {
       .finally(() => {
         if (isMounted) setIsLoading(false)
       })
-
     return () => {
       isMounted = false
     }
@@ -374,7 +371,6 @@ export default function Empresas() {
   useEffect(() => {
     const companyId = editingEmpresa?.id
     if (companyId === undefined) return
-
     let active = true
     getEmpresaContratos(companyId)
       .then((history) => { if (active) setContractHistory(history) })
@@ -483,7 +479,6 @@ export default function Empresas() {
     const payments = companiesToExport.flatMap((empresa) =>
       (empresa.pagos ?? []).map((pago) => ({ empresa, pago })),
     )
-
     if (option === 'empresas') {
       downloadCsv(`empresas_${date}.csv`, companyHeaders, companiesToExport.map(companyRow))
     } else if (option === 'pagos') {
@@ -508,7 +503,6 @@ export default function Empresas() {
         const company = companyRow(empresa)
         const companyPayments = empresa.pagos ?? []
         if (companyPayments.length === 0) return [[...company, '', '', '', '', '', '', '', '', '']]
-
         return companyPayments.map((pago) => [
           ...company,
           pago.id,
@@ -524,7 +518,6 @@ export default function Empresas() {
       })
       downloadCsv(`reporte_empresas_pagos_${date}.csv`, fullHeaders, fullRows)
     }
-
     setIsExportMenuOpen(false)
   }
 
@@ -589,7 +582,6 @@ export default function Empresas() {
     try {
       const hasValidRut = Boolean(empresaForm.rut.trim())
       if (!editingEmpresa && !hasValidRut) throw new Error('Ingresa el RUT antes de adjuntar el contrato.')
-
       const empresaData = {
         nombre: empresaForm.nombre.trim(),
         rut: empresaForm.rut.trim(),
@@ -612,7 +604,6 @@ export default function Empresas() {
       } else {
         persistedCompany = await empresaService.updateEmpresa(editingEmpresa.id, empresaData) as Empresa
       }
-
       if (contractFile) {
         if (persistedCompany.id === undefined) throw new Error('No se pudo identificar la empresa para guardar su contrato.')
         const historyEntry = await uploadEmpresaContrato(
@@ -653,7 +644,6 @@ export default function Empresas() {
       setError('El correo de prueba sólo está disponible para empresas VIGENTES con correo registrado.')
       return
     }
-
     setError('')
     setSuccess('')
     setTestingEmailEmpresaId(String(empresa.id))
@@ -674,7 +664,6 @@ export default function Empresas() {
     try {
       const result = await importIngresosCsv(file)
       await loadEmpresas()
-
       const summary = `Importación finalizada: ${result.importedPayments} de ${result.totalRows} registros procesados con éxito; ${result.createdCompanies} empresas nuevas y ${result.existingCompanies} ya existentes.`
       if (result.errors.length > 0) {
         const details = result.errors
@@ -711,15 +700,26 @@ export default function Empresas() {
     setSuccess('')
     setIsSavingPago(true)
     let uploadedVoucherPath: string | null = null
+    let uploadedFacturaPath: string | null = null
     let paymentSaved = false
     try {
       const empresaId = selectedEmpresa.id
       let voucherUrl: string | null = null
+      let facturaUrl: string | null = null
+
       if (voucherFile) {
         const uploadedVoucher = await uploadVoucher(voucherFile, empresaId)
         voucherUrl = uploadedVoucher.url
         uploadedVoucherPath = uploadedVoucher.path
       }
+
+      // Subir factura si se seleccionó
+      if (facturaFile) {
+        const uploadedFactura = await uploadVoucher(facturaFile, empresaId)
+        facturaUrl = uploadedFactura.url
+        uploadedFacturaPath = uploadedFactura.path
+      }
+
       await empresaService.createPago({
         empresa_id: String(empresaId),
         fecha_pago: pagoForm.fecha_pago,
@@ -731,6 +731,7 @@ export default function Empresas() {
         comision_tarjeta: comisionTarjeta,
         proximo_pago: pagoForm.proximo_pago,
         voucher_url: voucherUrl,
+        factura_url: facturaUrl, // <-- Guardamos la URL de la factura
       })
       paymentSaved = true
       await empresaService.updateEmpresa(empresaId, { estado: 'VIGENTE' })
@@ -739,15 +740,18 @@ export default function Empresas() {
       ))
       setPagoForm(EMPTY_PAGO)
       setVoucherFile(null)
+      setFacturaFile(null)
       if (voucherInputRef.current) voucherInputRef.current.value = ''
+      if (facturaInputRef.current) facturaInputRef.current.value = ''
       setSuccess(`Pago registrado y empresa ${selectedEmpresa.nombre} marcada VIGENTE.`)
       await loadEmpresas()
       const refreshedCompanies = await empresaService.getEmpresas() as Empresa[]
       const refreshedSelected = refreshedCompanies.find((empresa) => empresa.rut === selectedEmpresa.rut)
       if (refreshedSelected) setSelectedEmpresa(refreshedSelected)
-      else setSelectedEmpresa({ ...selectedEmpresa, estado: 'VIGENTE', pagos: [...(selectedEmpresa.pagos ?? []), { ...pagoForm, bruto, neto: netoCalculado, iva: ivaCalculado, monto_liquido: montoLiquido, comision_tarjeta: comisionTarjeta }] })
+      else setSelectedEmpresa({ ...selectedEmpresa, estado: 'VIGENTE', pagos: [...(selectedEmpresa.pagos ?? []), { ...pagoForm, bruto, neto: netoCalculado, iva: ivaCalculado, monto_liquido: montoLiquido, comision_tarjeta: comisionTarjeta, factura_url: facturaUrl }] })
     } catch (paymentError) {
       if (uploadedVoucherPath && !paymentSaved) await deleteVoucher(uploadedVoucherPath)
+      if (uploadedFacturaPath && !paymentSaved) await deleteVoucher(uploadedFacturaPath)
       console.error('No se pudo registrar el pago:', paymentError)
       const details = paymentError instanceof Error ? paymentError.message : 'Intenta nuevamente.'
       setError(paymentSaved
@@ -775,6 +779,7 @@ export default function Empresas() {
         : String(pago.monto_liquido),
     })
     setVoucherEditFile(null)
+    setFacturaEditFile(null)
     setError('')
   }
 
@@ -786,7 +791,6 @@ export default function Empresas() {
       setError('Ingresa un monto bruto válido.')
       return
     }
-
     const montoLiquidoEditado = pagoEditForm.monto_liquido.trim() === ''
       ? brutoEditado
       : Number(pagoEditForm.monto_liquido)
@@ -795,20 +799,29 @@ export default function Empresas() {
       return
     }
     const comisionTarjetaEditada = Math.round((brutoEditado - montoLiquidoEditado) * 100) / 100
-
     const netoEditado = Math.round((brutoEditado / 1.19) * 100) / 100
     const ivaEditado = Math.round((brutoEditado - netoEditado) * 100) / 100
     setIsSavingPago(true)
     setError('')
     setSuccess('')
     let uploadedVoucherPath: string | null = null
+    let uploadedFacturaPath: string | null = null
     try {
       let voucherUrl = editingPago.voucher_url ?? null
+      let facturaUrl = editingPago.factura_url ?? null
+
       if (voucherEditFile) {
         const companyId = selectedEmpresa?.id ?? selectedEmpresa?.rut ?? 'empresa'
         const uploadedVoucher = await uploadVoucher(voucherEditFile, companyId)
         voucherUrl = uploadedVoucher.url
         uploadedVoucherPath = uploadedVoucher.path
+      }
+
+      if (facturaEditFile) {
+        const companyId = selectedEmpresa?.id ?? selectedEmpresa?.rut ?? 'empresa'
+        const uploadedFactura = await uploadVoucher(facturaEditFile, companyId)
+        facturaUrl = uploadedFactura.url
+        uploadedFacturaPath = uploadedFactura.path
       }
 
       await empresaService.updatePago(editingPago.id, {
@@ -821,24 +834,32 @@ export default function Empresas() {
         monto_liquido: montoLiquidoEditado,
         comision_tarjeta: comisionTarjetaEditada,
         voucher_url: voucherUrl,
+        factura_url: facturaUrl, // <-- Actualizar factura
       })
       window.dispatchEvent(new Event(PAYMENTS_UPDATED_EVENT))
       if (voucherEditFile && editingPago.voucher_url) {
         await deleteVoucherByPublicUrl(editingPago.voucher_url)
       }
+      if (facturaEditFile && editingPago.factura_url) {
+        await deleteVoucherByPublicUrl(editingPago.factura_url)
+      }
+
       const updatedPayments = (selectedEmpresa?.pagos ?? []).map((pago) =>
         pago.id === editingPago.id
-          ? { ...pago, fecha_pago: pagoEditForm.fecha_pago, proximo_pago: pagoEditForm.proximo_pago, forma_pago: pagoEditForm.forma_pago, bruto: brutoEditado, neto: netoEditado, iva: ivaEditado, monto_liquido: montoLiquidoEditado, comision_tarjeta: comisionTarjetaEditada, voucher_url: voucherUrl }
+          ? { ...pago, fecha_pago: pagoEditForm.fecha_pago, proximo_pago: pagoEditForm.proximo_pago, forma_pago: pagoEditForm.forma_pago, bruto: brutoEditado, neto: netoEditado, iva: ivaEditado, monto_liquido: montoLiquidoEditado, comision_tarjeta: comisionTarjetaEditada, voucher_url: voucherUrl, factura_url: facturaUrl }
           : pago,
       )
       if (selectedEmpresa) setSelectedEmpresa({ ...selectedEmpresa, pagos: updatedPayments })
       setEditingPago(null)
       setVoucherEditFile(null)
+      setFacturaEditFile(null)
       if (voucherEditInputRef.current) voucherEditInputRef.current.value = ''
+      if (facturaEditInputRef.current) facturaEditInputRef.current.value = ''
       setSuccess('Pago actualizado correctamente.')
       await loadEmpresas()
     } catch (updateError) {
       if (uploadedVoucherPath) await deleteVoucher(uploadedVoucherPath)
+      if (uploadedFacturaPath) await deleteVoucher(uploadedFacturaPath)
       console.error('No se pudo actualizar el pago:', updateError)
       setError(updateError instanceof Error ? updateError.message : 'No fue posible actualizar el pago.')
     } finally {
@@ -848,13 +869,12 @@ export default function Empresas() {
 
   async function handleDeletePago() {
     if (pagoToDelete?.id === undefined || deletePagoConfirmation !== 'Eliminar' || isDeletingPago) return
-
     setIsDeletingPago(true)
     setDeletePagoError('')
     try {
       await empresaService.deletePago(pagoToDelete.id)
       if (pagoToDelete.voucher_url) await deleteVoucherByPublicUrl(pagoToDelete.voucher_url)
-
+      if (pagoToDelete.factura_url) await deleteVoucherByPublicUrl(pagoToDelete.factura_url) // <-- Eliminar factura de Storage
       const updatedPayments = (selectedEmpresa?.pagos ?? []).filter((pago) => pago.id !== pagoToDelete.id)
       if (selectedEmpresa) setSelectedEmpresa({ ...selectedEmpresa, pagos: updatedPayments })
       setEmpresas((current) => current.map((empresa) =>
@@ -924,28 +944,24 @@ export default function Empresas() {
 
   async function handleDeleteEmpresa() {
     if (empresaToDelete?.id === undefined || deleteConfirmation.trim() !== 'ELIMINAR' || isDeletingEmpresa) return
-
     setIsDeletingEmpresa(true)
     setDeleteError('')
     try {
       const contractHistory = await getEmpresaContratos(empresaToDelete.id)
       await empresaService.deleteEmpresa(empresaToDelete.id)
-
       const contractReferences = new Set([
         empresaToDelete.contrato_url,
         ...contractHistory.map((contract) => contract.contrato_url),
       ].filter((reference): reference is string => Boolean(reference)))
       const voucherReferences = new Set(
         (empresaToDelete.pagos ?? [])
-          .map((payment) => payment.voucher_url)
+          .flatMap((payment) => [payment.voucher_url, payment.factura_url])
           .filter((reference): reference is string => Boolean(reference)),
       )
-
       await Promise.all([
         ...[...contractReferences].map((reference) => deleteContractByPublicUrl(reference)),
         ...[...voucherReferences].map((reference) => deleteVoucherByPublicUrl(reference)),
       ])
-
       const deletedName = empresaToDelete.nombre
       window.dispatchEvent(new Event(EMPRESAS_UPDATED_EVENT))
       setEmpresaToDelete(null)
@@ -1093,7 +1109,6 @@ export default function Empresas() {
                 </button>
               </div>
             )}
-
           </div>
           <button
             type="button"
@@ -1105,7 +1120,6 @@ export default function Empresas() {
           </button>
         </div>
       </section>
-
       {pagoToDelete && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-[2px]">
           <section role="alertdialog" aria-modal="true" aria-labelledby="delete-payment-title" aria-describedby="delete-payment-warning" className="my-auto w-full max-w-lg overflow-hidden rounded-xl border border-rose-100 bg-white shadow-2xl shadow-slate-950/25">
@@ -1146,7 +1160,6 @@ export default function Empresas() {
           </section>
         </div>
       )}
-
       {(error || success) && (
         <div
           role={error ? 'alert' : 'status'}
@@ -1167,7 +1180,6 @@ export default function Empresas() {
           )}
         </div>
       )}
-
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.02]">
         <div className="flex flex-col gap-4 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:px-5">
           <div>
@@ -1186,7 +1198,6 @@ export default function Empresas() {
             />
           </label>
         </div>
-
         {isLoading ? (
           <div className="flex items-center justify-center gap-2 px-6 py-14 text-sm text-slate-500">
             <LoaderCircle size={18} className="animate-spin text-primary-600" />
@@ -1397,7 +1408,6 @@ export default function Empresas() {
           </div>
         )}
       </section>
-
       {isEmpresaModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/45 p-4 backdrop-blur-[2px]">
           <section role="dialog" aria-modal="true" aria-labelledby="new-company-title" className="my-auto w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl shadow-slate-950/20">
@@ -1528,7 +1538,6 @@ export default function Empresas() {
           </section>
         </div>
       )}
-
       {empresaToDelete && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-[2px]">
           <section role="alertdialog" aria-modal="true" aria-labelledby="delete-company-title" aria-describedby="delete-company-warning" className="my-auto w-full max-w-lg overflow-hidden rounded-xl border border-rose-100 bg-white shadow-2xl shadow-slate-950/25">
@@ -1569,7 +1578,6 @@ export default function Empresas() {
           </section>
         </div>
       )}
-
       {selectedEmpresa && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/45 p-4 backdrop-blur-[2px]">
           <section role="dialog" aria-modal="true" aria-labelledby="payments-title" className="my-auto w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl shadow-slate-950/20">
@@ -1583,7 +1591,6 @@ export default function Empresas() {
                 <X size={19} />
               </button>
             </div>
-
             <div className="max-h-[75vh] space-y-6 overflow-y-auto px-6 py-6 sm:px-7">
               <section>
                 <div className="mb-3 flex items-center gap-2">
@@ -1593,7 +1600,7 @@ export default function Empresas() {
                 </div>
                 {selectedEmpresa.pagos && selectedEmpresa.pagos.length > 0 ? (
                   <div className="overflow-x-auto rounded-lg border border-slate-200">
-                    <table className="w-full min-w-[600px] text-left">
+                    <table className="w-full min-w-[700px] text-left">
                       <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                         <tr>
                           <th className="px-4 py-3">Fecha</th>
@@ -1604,6 +1611,7 @@ export default function Empresas() {
                           <th className="px-4 py-3">Comisión</th>
                           <th className="px-4 py-3">Próximo pago</th>
                           <th className="px-4 py-3">Comprobante</th>
+                          <th className="px-4 py-3">Factura</th> {/* <-- Nueva columna en la tabla */}
                           <th className="px-4 py-3 text-right">Acción</th>
                         </tr>
                       </thead>
@@ -1620,6 +1628,13 @@ export default function Empresas() {
                             <td className="px-4 py-3">
                               {pago.voucher_url ? (
                                 <button type="button" onClick={() => void openPrivateFile(pago.voucher_url!, getSignedVoucherUrl)} className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary-600 hover:text-primary-700">
+                                  <ExternalLink size={14} /> Ver
+                                </button>
+                              ) : <span className="text-xs text-slate-400">—</span>}
+                            </td>
+                            <td className="px-4 py-3">
+                              {pago.factura_url ? (
+                                <button type="button" onClick={() => void openPrivateFile(pago.factura_url!, getSignedVoucherUrl)} className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary-600 hover:text-primary-700">
                                   <ExternalLink size={14} /> Ver
                                 </button>
                               ) : <span className="text-xs text-slate-400">—</span>}
@@ -1660,7 +1675,6 @@ export default function Empresas() {
                   <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-500">Aún no hay pagos registrados para esta empresa.</p>
                 )}
               </section>
-
               <form onSubmit={handleCreatePago} className="space-y-4 border-t border-slate-100 pt-5">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-800">Datos del pago</h3>
@@ -1716,49 +1730,96 @@ export default function Empresas() {
                     <p className="mt-1 text-xs text-slate-500">Se calcula según la frecuencia y puedes ajustarlo manualmente.</p>
                   </div>
                 </div>
-                <div>
-                  <label htmlFor="pago-voucher" className="mb-1.5 block text-sm font-medium text-slate-700">Comprobante de pago (opcional)</label>
-                  <input
-                    ref={voucherInputRef}
-                    id="pago-voucher"
-                    type="file"
-                    accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0] ?? null
-                      if (!file) {
-                        setVoucherFile(null)
-                        return
-                      }
-                      const extension = file.name.split('.').pop()?.toLocaleLowerCase()
-                      const validType = ['image/png', 'image/jpeg', 'application/pdf'].includes(file.type) ||
-                        ['png', 'jpg', 'jpeg', 'pdf'].includes(extension ?? '')
-                      if (!validType) {
-                        setVoucherFile(null)
-                        setError('Selecciona un comprobante PNG, JPG o PDF.')
-                        event.target.value = ''
-                        return
-                      }
-                      if (file.size > 10 * 1024 * 1024) {
-                        setVoucherFile(null)
-                        setError('El comprobante no puede superar 10 MB.')
-                        event.target.value = ''
-                        return
-                      }
-                      setError('')
-                      setVoucherFile(file)
-                    }}
-                    disabled={isSavingPago}
-                    className="block w-full rounded-lg border border-slate-200 bg-white text-sm text-slate-600 file:mr-3 file:h-10 file:border-0 file:bg-slate-50 file:px-4 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-primary-50"
-                  />
-                  {voucherFile && (
-                    <p className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-                      <FileImage size={15} className="text-primary-600" />
-                      <span className="truncate">{voucherFile.name}</span>
-                      <span className="shrink-0">({(voucherFile.size / 1024).toFixed(0)} KB)</span>
-                    </p>
-                  )}
-                  <p className="mt-1 text-xs text-slate-400">Formatos permitidos: PNG, JPG o PDF.</p>
+                
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="pago-voucher" className="mb-1.5 block text-sm font-medium text-slate-700">Comprobante de pago (opcional)</label>
+                    <input
+                      ref={voucherInputRef}
+                      id="pago-voucher"
+                      type="file"
+                      accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] ?? null
+                        if (!file) {
+                          setVoucherFile(null)
+                          return
+                        }
+                        const extension = file.name.split('.').pop()?.toLocaleLowerCase()
+                        const validType = ['image/png', 'image/jpeg', 'application/pdf'].includes(file.type) ||
+                          ['png', 'jpg', 'jpeg', 'pdf'].includes(extension ?? '')
+                        if (!validType) {
+                          setVoucherFile(null)
+                          setError('Selecciona un comprobante PNG, JPG o PDF.')
+                          event.target.value = ''
+                          return
+                        }
+                        if (file.size > 10 * 1024 * 1024) {
+                          setVoucherFile(null)
+                          setError('El comprobante no puede superar 10 MB.')
+                          event.target.value = ''
+                          return
+                        }
+                        setError('')
+                        setVoucherFile(file)
+                      }}
+                      disabled={isSavingPago}
+                      className="block w-full rounded-lg border border-slate-200 bg-white text-sm text-slate-600 file:mr-3 file:h-10 file:border-0 file:bg-slate-50 file:px-4 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-primary-50"
+                    />
+                    {voucherFile && (
+                      <p className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                        <FileImage size={15} className="text-primary-600" />
+                        <span className="truncate">{voucherFile.name}</span>
+                        <span className="shrink-0">({(voucherFile.size / 1024).toFixed(0)} KB)</span>
+                      </p>
+                    )}
+                  </div>
+
+                  {/* NUEVA CASILLA PARA LA FACTURA */}
+                  <div>
+                    <label htmlFor="pago-factura" className="mb-1.5 block text-sm font-medium text-slate-700">Factura adjuntada (opcional)</label>
+                    <input
+                      ref={facturaInputRef}
+                      id="pago-factura"
+                      type="file"
+                      accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] ?? null
+                        if (!file) {
+                          setFacturaFile(null)
+                          return
+                        }
+                        const extension = file.name.split('.').pop()?.toLocaleLowerCase()
+                        const validType = ['image/png', 'image/jpeg', 'application/pdf'].includes(file.type) ||
+                          ['png', 'jpg', 'jpeg', 'pdf'].includes(extension ?? '')
+                        if (!validType) {
+                          setFacturaFile(null)
+                          setError('Selecciona una factura PNG, JPG o PDF.')
+                          event.target.value = ''
+                          return
+                        }
+                        if (file.size > 10 * 1024 * 1024) {
+                          setFacturaFile(null)
+                          setError('La factura no puede superar 10 MB.')
+                          event.target.value = ''
+                          return
+                        }
+                        setError('')
+                        setFacturaFile(file)
+                      }}
+                      disabled={isSavingPago}
+                      className="block w-full rounded-lg border border-slate-200 bg-white text-sm text-slate-600 file:mr-3 file:h-10 file:border-0 file:bg-slate-50 file:px-4 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-primary-50"
+                    />
+                    {facturaFile && (
+                      <p className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                        <FileImage size={15} className="text-primary-600" />
+                        <span className="truncate">{facturaFile.name}</span>
+                        <span className="shrink-0">({(facturaFile.size / 1024).toFixed(0)} KB)</span>
+                      </p>
+                    )}
+                  </div>
                 </div>
+
                 <div className="grid gap-3 rounded-xl border border-primary-100 bg-primary-50/60 p-4 sm:grid-cols-2 lg:grid-cols-5">
                   <div>
                     <p className="text-xs font-medium text-slate-500">Monto bruto</p>
@@ -1794,7 +1855,6 @@ export default function Empresas() {
           </section>
         </div>
       )}
-
       {editingPago && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-slate-900/45 p-4 backdrop-blur-[2px]">
           <section role="dialog" aria-modal="true" aria-labelledby="edit-payment-title" className="my-auto w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl shadow-slate-950/20">
@@ -1807,7 +1867,6 @@ export default function Empresas() {
                 <X size={19} />
               </button>
             </div>
-
             <form onSubmit={handleUpdatePago} className="space-y-5 px-6 py-6">
               <div>
                 <label htmlFor="edit-pago-fecha" className="mb-1.5 block text-sm font-medium text-slate-700">Fecha de pago</label>
@@ -1831,61 +1890,106 @@ export default function Empresas() {
                 <label htmlFor="edit-pago-liquido" className="mb-1.5 block text-sm font-medium text-slate-700">Monto líquido recibido (opcional)</label>
                 <input id="edit-pago-liquido" type="number" min="0" max={brutoEditadoPreview || undefined} step="0.01" value={pagoEditForm.monto_liquido} onChange={(event) => setPagoEditForm((current) => ({ ...current, monto_liquido: event.target.value }))} placeholder="Vacío = igual al bruto" className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100" />
               </div>
-              <div className="space-y-2">
-                <p className="block text-sm font-medium text-slate-700">Comprobante de pago</p>
-                {editingPago.voucher_url ? (
-                  <button
-                    type="button"
-                    onClick={() => void openPrivateFile(editingPago.voucher_url!, getSignedVoucherUrl)}
-                    className="inline-flex items-center gap-2 rounded-lg border border-primary-100 bg-primary-50 px-3 py-2 text-sm font-semibold text-primary-700 hover:bg-primary-100"
-                  >
-                    <ExternalLink size={16} />
-                    Ver comprobante actual
-                  </button>
-                ) : (
-                  <p className="text-xs text-slate-500">Este pago aún no tiene un comprobante adjunto.</p>
-                )}
-                <input
-                  ref={voucherEditInputRef}
-                  id="edit-pago-voucher"
-                  type="file"
-                  accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf"
-                  disabled={isSavingPago}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0] ?? null
-                    if (!file) {
-                      setVoucherEditFile(null)
-                      return
-                    }
-                    const extension = file.name.split('.').pop()?.toLocaleLowerCase()
-                    const validType = ['image/png', 'image/jpeg', 'application/pdf'].includes(file.type) ||
-                      ['png', 'jpg', 'jpeg', 'pdf'].includes(extension ?? '')
-                    if (!validType) {
-                      setVoucherEditFile(null)
-                      setError('Selecciona un comprobante PNG, JPG o PDF.')
-                      event.target.value = ''
-                      return
-                    }
-                    if (file.size > 10 * 1024 * 1024) {
-                      setVoucherEditFile(null)
-                      setError('El comprobante no puede superar 10 MB.')
-                      event.target.value = ''
-                      return
-                    }
-                    setError('')
-                    setVoucherEditFile(file)
-                  }}
-                  className="block w-full rounded-lg border border-slate-200 bg-white text-sm text-slate-600 file:mr-3 file:h-10 file:border-0 file:bg-slate-50 file:px-4 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-primary-50"
-                />
-                {voucherEditFile && (
-                  <p className="flex items-center gap-2 text-xs text-slate-500">
-                    <FileImage size={15} className="shrink-0 text-primary-600" />
-                    <span className="truncate">Reemplazar por: {voucherEditFile.name}</span>
-                    <span className="shrink-0">({(voucherEditFile.size / 1024).toFixed(0)} KB)</span>
-                  </p>
-                )}
-                <p className="text-xs text-slate-400">Deja el selector vacío para conservar el comprobante actual. Máximo 10 MB.</p>
+              
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <p className="block text-sm font-medium text-slate-700">Comprobante de pago</p>
+                  {editingPago.voucher_url ? (
+                    <button
+                      type="button"
+                      onClick={() => void openPrivateFile(editingPago.voucher_url!, getSignedVoucherUrl)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-primary-100 bg-primary-50 px-3 py-2 text-sm font-semibold text-primary-700 hover:bg-primary-100"
+                    >
+                      <ExternalLink size={16} />
+                      Ver comprobante actual
+                    </button>
+                  ) : (
+                    <p className="text-xs text-slate-500">Este pago aún no tiene un comprobante adjunto.</p>
+                  )}
+                  <input
+                    ref={voucherEditInputRef}
+                    id="edit-pago-voucher"
+                    type="file"
+                    accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf"
+                    disabled={isSavingPago}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null
+                      if (!file) {
+                        setVoucherEditFile(null)
+                        return
+                      }
+                      const extension = file.name.split('.').pop()?.toLocaleLowerCase()
+                      const validType = ['image/png', 'image/jpeg', 'application/pdf'].includes(file.type) ||
+                        ['png', 'jpg', 'jpeg', 'pdf'].includes(extension ?? '')
+                      if (!validType) {
+                        setVoucherEditFile(null)
+                        setError('Selecciona un comprobante PNG, JPG o PDF.')
+                        event.target.value = ''
+                        return
+                      }
+                      if (file.size > 10 * 1024 * 1024) {
+                        setVoucherEditFile(null)
+                        setError('El comprobante no puede superar 10 MB.')
+                        event.target.value = ''
+                        return
+                      }
+                      setError('')
+                      setVoucherEditFile(file)
+                    }}
+                    className="block w-full rounded-lg border border-slate-200 bg-white text-sm text-slate-600 file:mr-3 file:h-10 file:border-0 file:bg-slate-50 file:px-4 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-primary-50"
+                  />
+                </div>
+
+                {/* EDICIÓN DE FACTURA */}
+                <div className="space-y-2">
+                  <p className="block text-sm font-medium text-slate-700">Factura adjuntada</p>
+                  {editingPago.factura_url ? (
+                    <button
+                      type="button"
+                      onClick={() => void openPrivateFile(editingPago.factura_url!, getSignedVoucherUrl)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-primary-100 bg-primary-50 px-3 py-2 text-sm font-semibold text-primary-700 hover:bg-primary-100"
+                    >
+                      <ExternalLink size={16} />
+                      Ver factura actual
+                    </button>
+                  ) : (
+                    <p className="text-xs text-slate-500">Este pago aún no tiene una factura adjunta.</p>
+                  )}
+                  <input
+                    ref={facturaEditInputRef}
+                    id="edit-pago-factura"
+                    type="file"
+                    accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf"
+                    disabled={isSavingPago}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null
+                      if (!file) {
+                        setFacturaEditFile(null)
+                        return
+                      }
+                      const extension = file.name.split('.').pop()?.toLocaleLowerCase()
+                      const validType = ['image/png', 'image/jpeg', 'application/pdf'].includes(file.type) ||
+                        ['png', 'jpg', 'jpeg', 'pdf'].includes(extension ?? '')
+                      if (!validType) {
+                        setFacturaEditFile(null)
+                        setError('Selecciona una factura PNG, JPG o PDF.')
+                        event.target.value = ''
+                        return
+                      }
+                      if (file.size > 10 * 1024 * 1024) {
+                        setFacturaEditFile(null)
+                        setError('La factura no puede superar 10 MB.')
+                        event.target.value = ''
+                        return
+                      }
+                      setError('')
+                      setFacturaEditFile(file)
+                    }}
+                    className="block w-full rounded-lg border border-slate-200 bg-white text-sm text-slate-600 file:mr-3 file:h-10 file:border-0 file:bg-slate-50 file:px-4 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-primary-50"
+                  />
+                </div>
               </div>
+
               {(() => {
                 const editBruto = Number(pagoEditForm.bruto) || 0
                 const editNeto = Math.round((editBruto / 1.19) * 100) / 100
