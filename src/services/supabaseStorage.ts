@@ -148,6 +148,7 @@ export const empresaService = {
     comision_tarjeta: number
     proximo_pago: string
     voucher_url?: string | null
+    factura_url?: string | null // <-- ¡Agregado aquí!
   }) => {
     const { data, error } = await supabase
       .from('pagos')
@@ -168,6 +169,7 @@ export const empresaService = {
     monto_liquido: number
     comision_tarjeta: number
     voucher_url?: string | null
+    factura_url?: string | null // <-- ¡Y agregado aquí también!
   }) => {
     const { data, error } = await supabase
       .from('pagos')
