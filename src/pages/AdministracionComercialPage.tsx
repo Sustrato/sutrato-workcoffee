@@ -41,7 +41,6 @@ export default function AdministracionComercialPage() {
   const [formaPago, setFormaPago] = useState('Transferencia')
   const [montoBruto, setMontoBruto] = useState(350000)
   const [montoLiquido, setMontoLiquido] = useState(350000)
-  const [comisionTarjeta, setComisionTarjeta] = useState(0)
   const [proximoPago, setProximoPago] = useState('')
   
   // Archivo único para comprobante de pago
@@ -272,7 +271,6 @@ export default function AdministracionComercialPage() {
         monto_neto: netoCalculado,
         iva: ivaCalculado,
         monto_liquido: montoLiquido,
-        comision_tarjeta: comisionTarjeta,
         proximo_pago: proximoPago,
         comprobante_url: urlComprobante || null
       }
@@ -284,7 +282,6 @@ export default function AdministracionComercialPage() {
         linea_negocio: 'Arriendo Oficina Física',
         medio_pago: formaPago,
         monto_bruto: montoBruto,
-        comision: comisionTarjeta,
         documento: `PAGO-OF-${empresaSeleccionada.nombre_cliente.substring(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}`,
         observacion: `Cobro arriendo: ${empresaSeleccionada.tipo_espacio} (${empresaSeleccionada.nombre_cliente})`
       }
@@ -715,10 +712,7 @@ export default function AdministracionComercialPage() {
                     <p className="text-[10px] font-semibold text-slate-500">Líquido recibido</p>
                     <p className="font-bold text-slate-800 text-xs mt-0.5">${montoLiquido.toLocaleString('es-CL')}</p>
                   </div>
-                  <div>
-                    <p className="text-[10px] font-semibold text-slate-500">Comisión tarjeta</p>
-                    <p className="font-bold text-slate-800 text-xs mt-0.5">${comisionTarjeta.toLocaleString('es-CL')}</p>
-                  </div>
+        
                 </div>
                 <div className="pt-2 flex justify-end gap-3">
                   <button type="button" onClick={() => setIsPagosModalOpen(false)} className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700">

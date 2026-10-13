@@ -15,7 +15,7 @@ interface EventoReserva {
 export default function CalendarioOficinasPage() {
   const [currentDate, setCurrentDate] = useState(new Date(2026, 9, 12)) // Octubre 2026
   const [eventos, setEventos] = useState<EventoReserva[]>([])
-  const [loading, setLoading] = useState(false)
+  const [_loading, setLoading] = useState(false)
   const [vista, setVista] = useState<'mes' | 'semana'>('mes')
 
   // Cargar reservas desde Supabase

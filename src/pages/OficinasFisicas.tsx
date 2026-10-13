@@ -47,7 +47,7 @@ export default function OficinasFisicas() {
   const [correo, setCorreo] = useState('')
   const [observaciones, setObservaciones] = useState('')
   const [tipoEspacio, setTipoEspacio] = useState(ESPACIOS_DISPONIBLES[0])
-  const [fechaInicio, setFechaInicio] = useState(new Date().toISOString().split('T')[0])
+  const [fechaInicio, _setFechaInicio] = useState(new Date().toISOString().split('T')[0])
   const [montoMensual, setMontoMensual] = useState('')
 
   // Cargar arriendos desde Supabase

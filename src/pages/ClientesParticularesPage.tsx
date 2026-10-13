@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
-import { Plus, X, Search, Calendar, Trash2, Edit2, Clock } from 'lucide-react'
+import { Plus, X, Search, Calendar, Trash2, Edit2} from 'lucide-react'
 
 interface ClienteParticular {
   id: string
