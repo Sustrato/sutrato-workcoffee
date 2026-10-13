@@ -9,13 +9,18 @@ import {
   LayoutDashboard,
   LoaderCircle,
   Settings2,
+  Building2,
+  Store,
+  Coffee,
+  Users,
+  Calendar as CalendarIcon
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { EMPRESAS_UPDATED_EVENT } from '../services/siiNotices'
 import { getNotificationFeed, PAYMENTS_UPDATED_EVENT, type NotificationFeed } from '../services/notifications'
 
-const navigation = [
+const navigationOficinas = [
   { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, end: true },
   { label: 'Empresas', to: '/documentos', icon: Files },
   { label: 'Contratos', to: '/contratos', icon: FileText },
@@ -24,14 +29,39 @@ const navigation = [
   { label: 'Reportes', to: '/reportes', icon: BarChart3 },
 ]
 
+const navigationOficinasFisicas = [
+  { label: 'Resumen comercial', to: '/oficinas-fisicas/resumen', icon: Store, end: true },
+  { label: 'Administración comercial', to: '/oficinas-fisicas/administracion', icon: Building2 },
+  { label: 'Clientes particulares', to: '/oficinas-fisicas/particulares', icon: Users },
+  { label: 'Calendario de oficinas', to: '/oficinas-fisicas/calendario', icon: CalendarIcon },
+  { label: 'Contratos', to: '/oficinas-fisicas/contratos', icon: FileText },
+  { label: 'Plantilla de contrato', to: '/oficinas-fisicas/plantilla-contrato', icon: Settings2 },
+  { label: 'Historial SII', to: '/oficinas-fisicas/historial-sii', icon: Clock3 },
+  { label: 'Reportes', to: '/oficinas-fisicas/reportes', icon: BarChart3 },
+]
+
+const navigationCatering = [
+  { label: 'Panel Catering', to: '/catering/dashboard', icon: Coffee, end: true },
+  { label: 'Eventos y Pedidos', to: '/catering/pedidos', icon: FileText },
+]
+
 export default function MainLayout() {
   const navigate = useNavigate()
+  const location = useLocation()
   const notificationsRef = useRef<HTMLDivElement>(null)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const [isLoadingNotifications, setIsLoadingNotifications] = useState(true)
   const [notificationError, setNotificationError] = useState('')
   const [notificationFeed, setNotificationFeed] = useState<NotificationFeed>({ alerts: [], recentPayments: [] })
+  
   const alertCount = notificationFeed.alerts.length
+
+  // Detectar el módulo activo según la ruta actual
+  const currentModule = location.pathname.startsWith('/oficinas-fisicas') 
+    ? 'fisicas' 
+    : location.pathname.startsWith('/catering') 
+      ? 'catering' 
+      : 'oficinas'
 
   const loadNotifications = useCallback(async () => {
     setIsLoadingNotifications(true)
@@ -84,9 +114,33 @@ export default function MainLayout() {
     navigate('/documentos')
   }
 
+  const handleModuleSwitch = (module: 'oficinas' | 'fisicas' | 'catering') => {
+    if (module === 'oficinas') {
+      navigate('/dashboard')
+    } else if (module === 'fisicas') {
+      navigate('/oficinas-fisicas/resumen')
+    } else {
+      navigate('/catering/dashboard')
+    }
+  }
+
+  const activeNavigation = 
+    currentModule === 'oficinas' 
+      ? navigationOficinas 
+      : currentModule === 'fisicas' 
+        ? navigationOficinasFisicas 
+        : navigationCatering
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col border-r border-slate-200 bg-white md:flex print:hidden">
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
+      
+      <aside className={`fixed inset-y-0 left-0 z-20 hidden w-64 flex-col border-r border-slate-200 md:flex print:hidden ${
+        currentModule === 'fisicas'
+          ? 'bg-primary-50/20' 
+          : currentModule === 'catering'
+            ? 'bg-orange-50/30'
+            : 'bg-white'
+      }`}>
         <div className="flex h-20 items-center gap-3 border-b border-slate-100 px-6">
           <img
             src="/Sustrato%20Logo.png"
@@ -95,7 +149,7 @@ export default function MainLayout() {
           />
           <div>
             <p className="text-sm font-bold tracking-tight text-slate-900">Sutrato WorkCoffee</p>
-            <p className="text-xs text-slate-500">Gestor Administrativo y Financiero</p>
+            <p className="text-xs text-slate-500">Gestor Administrativo</p>
           </div>
         </div>
 
@@ -103,7 +157,8 @@ export default function MainLayout() {
           <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
             Menú principal
           </p>
-          {navigation.map(({ label, to, icon: Icon, end }) => (
+
+          {activeNavigation.map(({ label, to, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}
@@ -111,7 +166,9 @@ export default function MainLayout() {
               className={({ isActive }) =>
                 `group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                   isActive
-                    ? 'bg-primary-50 text-primary-700'
+                    ? currentModule === 'catering'
+                      ? 'bg-orange-100 text-orange-900 border-l-4 border-orange-600 font-bold'
+                      : 'bg-primary-50 text-primary-700 font-bold'
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                 }`
               }
@@ -139,7 +196,40 @@ export default function MainLayout() {
 
       <div className="md:pl-64">
         <header className="app-navbar sticky top-0 z-30 flex h-20 items-center justify-between gap-4 border-b border-slate-200 bg-white/95 px-4 backdrop-blur sm:px-8 print:hidden">
-          <div className="flex shrink-0 items-center gap-3 sm:gap-5">
+          
+          <div className="flex items-center gap-4">
+            
+            {/* SELECTOR DE MÓDULOS SUPERIOR */}
+            <div className="flex bg-slate-100 p-1 rounded-xl">
+              <button 
+                type="button"
+                onClick={() => handleModuleSwitch('oficinas')}
+                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                  currentModule === 'oficinas' ? 'bg-white shadow-sm text-slate-900 font-semibold' : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                Oficinas Virtuales
+              </button>
+              <button 
+                type="button"
+                onClick={() => handleModuleSwitch('fisicas')}
+                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                  currentModule === 'fisicas' ? 'bg-white shadow-sm text-slate-900 font-semibold' : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                Oficinas Físicas
+              </button>
+              <button 
+                type="button"
+                onClick={() => handleModuleSwitch('catering')}
+                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                  currentModule === 'catering' ? 'bg-white shadow-sm text-orange-900 font-semibold' : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                Coffee & Catering
+              </button>
+            </div>
+
             <div ref={notificationsRef} className="relative">
               <button
                 type="button"
@@ -162,7 +252,6 @@ export default function MainLayout() {
                     </div>
                     <button type="button" onClick={() => void loadNotifications()} aria-label="Actualizar notificaciones" className="text-xs font-semibold text-primary-700 hover:text-primary-800">Actualizar</button>
                   </header>
-
                   <div className="max-h-[min(70vh,32rem)] overflow-y-auto">
                     {isLoadingNotifications ? (
                       <div className="flex items-center justify-center gap-2 px-4 py-8 text-sm text-slate-500"><LoaderCircle size={16} className="animate-spin" /> Cargando...</div>
@@ -181,7 +270,6 @@ export default function MainLayout() {
                             </button>
                           ))}
                         </div>
-
                         <div className="px-4 py-3">
                           <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Pagos recientes</h3>
                           {notificationFeed.recentPayments.length === 0 ? (
@@ -214,7 +302,7 @@ export default function MainLayout() {
 
         <nav aria-label="Navegación principal" className="sticky top-20 z-20 border-b border-slate-200 bg-white px-4 py-2 md:hidden print:hidden">
           <div className="flex min-w-0 gap-1 overflow-x-auto">
-            {navigation.map(({ label, to, icon: Icon, end }) => (
+            {activeNavigation.map(({ label, to, icon: Icon, end }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -222,7 +310,7 @@ export default function MainLayout() {
                 className={({ isActive }) =>
                   `inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
                     isActive
-                      ? 'bg-primary-50 text-primary-700'
+                      ? 'bg-primary-50 text-primary-700 font-bold'
                       : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                   }`
                 }
