@@ -192,9 +192,9 @@ export default function AdministracionComercialPage() {
 
     setEnviandoZohoId(empresaItem.id)
     try {
-      const { data, error } = await supabase.functions.invoke('enviar-zoho-form', {
-        body: { rut_empresa: empresaItem.rut_empresa }
-      })
+    const { error } = await supabase.functions.invoke('enviar-zoho-form', {
+  body: { rut_empresa: empresaItem.rut_empresa }
+})
 
       if (error) throw error
 
