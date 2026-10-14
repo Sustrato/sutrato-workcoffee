@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { Plus, X, Trash2, CreditCard, ExternalLink, Search, FileText, Edit2 } from 'lucide-react'
+import { Plus, X, Trash2, CreditCard, ExternalLink, Search, FileText, Edit2, Send, CheckCircle2, Clock } from 'lucide-react'
 
 export default function AdministracionComercialPage() {
   const navigate = useNavigate()
   const [arriendos, setArriendos] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
+  const [enviandoZohoId, setEnviandoZohoId] = useState<string | null>(null)
   
   // Modales
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -34,7 +35,7 @@ export default function AdministracionComercialPage() {
   const [fechaInicio, setFechaInicio] = useState(new Date().toISOString().split('T')[0])
   const [frecuencia, setFrecuencia] = useState('MENSUAL')
   const [montoMensual, setMontoMensual] = useState('350000')
-  const [vigencia, setVigencia] = useState('VIGENTE') // 🟢/🔴 Estado de vigencia
+  const [vigencia, setVigencia] = useState('VIGENTE')
 
   // Formulario "Registrar pago"
   const [fechaPago, setFechaPago] = useState(new Date().toISOString().split('T')[0])
@@ -48,8 +49,8 @@ export default function AdministracionComercialPage() {
 
   // Lista base de oficinas privadas
   const listaOficinas = ['Oficina 1', 'Oficina 2', 'Oficina 3', 'Oficina 4', 'Oficina 5', 'Oficina 6', 'Oficina 7']
-
-  // Detectar oficinas ocupadas por contratos activos (excluyendo la empresa que se está editando)
+  
+  // Detectar oficinas ocupadas por contratos activos
   const oficinasOcupadas = arriendos
     .filter(a => a.estado === 'Activo' && a.id !== editingId)
     .map(a => a.tipo_espacio)
@@ -85,7 +86,7 @@ export default function AdministracionComercialPage() {
     setFechaInicio(new Date().toISOString().split('T')[0])
     setFrecuencia('MENSUAL')
     setMontoMensual('350000')
-    setVigencia('VIGENTE') // Al crear siempre inicia VIGENTE
+    setVigencia('VIGENTE')
     const primeraDisponible = listaOficinas.find(of => !oficinasOcupadas.includes(of))
     if (primeraDisponible) setTipoEspacio(primeraDisponible)
   }
@@ -121,7 +122,7 @@ export default function AdministracionComercialPage() {
     }
   }, [fechaPago, frecuencia])
 
-  // Cargar el historial de pagos de la empresa seleccionada
+  // Cargar el historial de pagos
   const fetchHistorialPagos = async (empresaId: string) => {
     setLoadingPagos(true)
     const { data } = await supabase
@@ -179,6 +180,33 @@ export default function AdministracionComercialPage() {
     }
   }
 
+  // 🚀 Enviar datos a Zoho Forms mediante la Edge Function de Supabase
+  const handleEnviarAZoho = async (empresaItem: any) => {
+    if (!empresaItem.rut_empresa) {
+      return alert('La empresa no tiene un RUT registrado para procesar la sincronización.')
+    }
+
+    if (!confirm(`¿Deseas procesar y enviar la aceptación de términos de "${empresaItem.nombre_cliente}" hacia Zoho Forms?`)) {
+      return
+    }
+
+    setEnviandoZohoId(empresaItem.id)
+    try {
+      const { data, error } = await supabase.functions.invoke('enviar-zoho-form', {
+        body: { rut_empresa: empresaItem.rut_empresa }
+      })
+
+      if (error) throw error
+
+      alert('¡Términos sincronizados y enviados a Zoho Forms correctamente!')
+      fetchArriendos()
+    } catch (err: any) {
+      alert('Error al sincronizar con Zoho: ' + (err.message || 'Error desconocido'))
+    } finally {
+      setEnviandoZohoId(null)
+    }
+  }
+
   // Subir archivo a Supabase Storage
   const uploadFile = async (file: File, folder: string) => {
     const fileExt = file.name.split('.').pop()
@@ -204,7 +232,6 @@ export default function AdministracionComercialPage() {
     if (oficinasOcupadas.includes(tipoEspacio)) {
       return alert(`La ${tipoEspacio} ya se encuentra ocupada por un contrato activo.`)
     }
-
     const payload = {
       nombre_cliente: empresa,
       rut_empresa: rutEmpresa,
@@ -217,19 +244,16 @@ export default function AdministracionComercialPage() {
       fecha_inicio: fechaInicio,
       frecuencia,
       monto_mensual: Number(montoMensual) || 0,
-      vigencia, // 🟢/🔴 Guarda el estado de vigencia actual
+      vigencia,
     }
-
     let error;
     if (editingId) {
-      // MODO EDITAR
       const res = await supabase
         .from('oficinas_fisicas')
         .update(payload)
         .eq('id', editingId)
       error = res.error
     } else {
-      // MODO CREAR
       const res = await supabase
         .from('oficinas_fisicas')
         .insert([{
@@ -240,7 +264,6 @@ export default function AdministracionComercialPage() {
         }])
       error = res.error
     }
-
     if (!error) {
       alert(editingId ? '¡Empresa actualizada con éxito!' : '¡Empresa guardada con éxito!')
       setIsModalOpen(false)
@@ -261,7 +284,6 @@ export default function AdministracionComercialPage() {
       const url = await uploadFile(comprobanteFile, 'comprobantes')
       if (url) urlComprobante = url
     }
-
     const { error: errPago } = await supabase.from('pagos_oficinas_fisicas').insert([
       {
         empresa_id: empresaSeleccionada.id,
@@ -275,7 +297,6 @@ export default function AdministracionComercialPage() {
         comprobante_url: urlComprobante || null
       }
     ])
-
     await supabase.from('ventas_diarias').insert([
       {
         fecha: fechaPago,
@@ -286,7 +307,6 @@ export default function AdministracionComercialPage() {
         observacion: `Cobro arriendo: ${empresaSeleccionada.tipo_espacio} (${empresaSeleccionada.nombre_cliente})`
       }
     ])
-
     const { error: errEmpresa } = await supabase
       .from('oficinas_fisicas')
       .update({
@@ -294,7 +314,6 @@ export default function AdministracionComercialPage() {
         vigencia: 'VIGENTE'
       })
       .eq('id', empresaSeleccionada.id)
-
     setUploading(false)
     if (!errPago && !errEmpresa) {
       alert('¡Pago registrado con éxito!')
@@ -353,7 +372,7 @@ export default function AdministracionComercialPage() {
             Administración comercial
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Directorio, documentos e historial de arriendos
+            Directorio, documentos, términos y condiciones e historial de arriendos
           </p>
         </div>
         <div className="flex gap-3 items-center">
@@ -385,7 +404,7 @@ export default function AdministracionComercialPage() {
               <th className="py-3.5 px-4">REPRESENTANTE LEGAL / RUT</th>
               <th className="py-3.5 px-4">CONTACTO</th>
               <th className="py-3.5 px-4">FRECUENCIA</th>
-              <th className="py-3.5 px-4">PRÓXIMO PAGO</th>
+              <th className="py-3.5 px-4">TÉRMINOS / ZOHO</th>
               <th className="py-3.5 px-4 text-center">VIGENCIA</th>
               <th className="py-3.5 px-4 text-center">CONTRATO</th>
               <th className="py-3.5 px-4 text-right">ACCIONES</th>
@@ -416,8 +435,25 @@ export default function AdministracionComercialPage() {
                       {a.frecuencia || 'MENSUAL'}
                     </span>
                   </td>
-                  <td className="py-4 px-4 font-semibold text-slate-800">
-                    • Al día · {a.proximo_pago || '—'}
+                  {/* 🟢 ESTADO TÉRMINOS & ZOHO */}
+                  <td className="py-4 px-4">
+                    <div className="flex flex-col gap-1">
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full w-fit ${
+                        a.terminos_aceptados 
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                          : 'bg-amber-100 text-amber-800 border border-amber-200'
+                      }`}>
+                        {a.terminos_aceptados ? <CheckCircle2 size={10} /> : <Clock size={10} />}
+                        {a.terminos_aceptados ? 'Aceptado' : 'Pendiente'}
+                      </span>
+                      <button
+                        onClick={() => handleEnviarAZoho(a)}
+                        disabled={enviandoZohoId === a.id}
+                        className="text-[10px] text-blue-600 hover:underline font-bold flex items-center gap-1 disabled:opacity-50"
+                      >
+                        <Send size={10} /> {enviandoZohoId === a.id ? 'Enviando...' : 'Sincronizar Zoho'}
+                      </button>
+                    </div>
                   </td>
                   <td className="py-4 px-4 text-center">
                     <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
@@ -442,7 +478,7 @@ export default function AdministracionComercialPage() {
                       {a.contrato_url ? 'Ver contrato' : 'Generar / Editar'}
                     </button>
                   </td>
-                  {/* ⚙️ ACCIONES (REGISTRAR PAGOS, EDITAR EMPRESA, ELIMINAR REGISTRO) */}
+                  {/* ⚙️ ACCIONES */}
                   <td className="py-4 px-4 text-right space-x-1.5">
                     <button 
                       onClick={() => handleAbrirPagos(a)}
@@ -451,7 +487,6 @@ export default function AdministracionComercialPage() {
                     >
                       <CreditCard size={14} /> Pagos
                     </button>
-                    
                     <button 
                       onClick={() => handleAbrirEditar(a)}
                       className="p-1.5 text-slate-600 hover:text-slate-900 border border-slate-200 rounded-lg hover:bg-slate-100 align-middle transition"
@@ -493,7 +528,7 @@ export default function AdministracionComercialPage() {
                   <input type="text" value={empresa} onChange={(e) => setEmpresa(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">RUT empresa *</label>
+                  <label className="block font-bold text-slate-700 mb-1">RUT empresa * (ej: 18869385-7)</label>
                   <input type="text" value={rutEmpresa} onChange={(e) => setRutEmpresa(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
                 </div>
                 <div>
@@ -544,8 +579,6 @@ export default function AdministracionComercialPage() {
                   <label className="block font-bold text-slate-700 mb-1">Monto mensual ($)</label>
                   <input type="number" value={montoMensual} onChange={(e) => setMontoMensual(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
                 </div>
-
-                {/* 🔴/🟢 CAMPO VIGENCIA (Habilitado para edición) */}
                 {editingId && (
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Vigencia contrato</label>
@@ -600,8 +633,6 @@ export default function AdministracionComercialPage() {
             </div>
             
             <div className="p-6 space-y-6 text-xs">
-              
-              {/* Historial de Pagos */}
               <div>
                 <h4 className="font-bold text-slate-800 mb-2">Pagos e historial registrado ({historialPagos.length})</h4>
                 <div className="border border-slate-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
@@ -695,7 +726,7 @@ export default function AdministracionComercialPage() {
                     />
                   </div>
                 </div>
-                <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
+                <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                   <div>
                     <p className="text-[10px] font-semibold text-slate-500">Monto bruto</p>
                     <p className="font-extrabold text-slate-900 text-sm mt-0.5">${montoBruto.toLocaleString('es-CL')}</p>
@@ -712,7 +743,6 @@ export default function AdministracionComercialPage() {
                     <p className="text-[10px] font-semibold text-slate-500">Líquido recibido</p>
                     <p className="font-bold text-slate-800 text-xs mt-0.5">${montoLiquido.toLocaleString('es-CL')}</p>
                   </div>
-        
                 </div>
                 <div className="pt-2 flex justify-end gap-3">
                   <button type="button" onClick={() => setIsPagosModalOpen(false)} className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700">

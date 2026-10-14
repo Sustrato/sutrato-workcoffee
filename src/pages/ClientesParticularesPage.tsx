@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
-import { Plus, X, Search, Calendar, Trash2, Edit2} from 'lucide-react'
+import { Plus, X, Search, Calendar, Trash2, Edit2, Upload } from 'lucide-react'
 
 interface ClienteParticular {
   id: string
@@ -17,12 +17,14 @@ interface UsoOficina {
   id: string
   oficina_asignada: string
   fecha_inicio: string
+  fecha_fin: string
   hora_inicio: string
   hora_fin: string
   modalidad: string
   horas_calculadas: number
   monto_total: number
   estado_pago: string
+  voucher_url?: string
 }
 
 export default function ClientesParticularesPage() {
@@ -34,8 +36,9 @@ export default function ClientesParticularesPage() {
   const [isClienteModalOpen, setIsClienteModalOpen] = useState(false)
   const [isArriendoModalOpen, setIsArriendoModalOpen] = useState(false)
   
-  // Estado para Edición de Cliente
+  // Estado para Edición de Cliente y Edición de Visita/Arriendo
   const [editingClienteId, setEditingClienteId] = useState<string | null>(null)
+  const [editingVisitaId, setEditingVisitaId] = useState<string | null>(null)
   
   // Modal de confirmación de eliminación segura
   const [clienteAEliminar, setClienteAEliminar] = useState<ClienteParticular | null>(null)
@@ -49,7 +52,7 @@ export default function ClientesParticularesPage() {
   const [direccion, setDireccion] = useState('')
   const [obsCliente, setObsCliente] = useState('')
   
-  // Campos del Modal "Registrar arriendo"
+  // Campos del Modal "Registrar / Editar arriendo"
   const [clienteSeleccionadoId, setClienteSeleccionadoId] = useState('')
   const [oficina, setOficina] = useState('Oficina 1')
   const [fechaIngreso, setFechaIngreso] = useState(new Date().toISOString().split('T')[0])
@@ -66,8 +69,10 @@ export default function ClientesParticularesPage() {
   const [horasCalculadas, setHorasCalculadas] = useState(1)
   const [valorCalculado, setValorCalculado] = useState(3000)
   const [estadoPago, setEstadoPago] = useState('Pagado')
-  const [voucherUrl, setVoucherUrl] = useState('')
-  const [contratoUrl, setContratoUrl] = useState('')
+  
+  // Estado para subida de archivo de Voucher
+  const [voucherFile, setVoucherFile] = useState<File | null>(null)
+  const [uploadingVoucher, setUploadingVoucher] = useState(false)
   const [basesAceptadas, setBasesAceptadas] = useState(false)
   const [fechaAceptacion, setFechaAceptacion] = useState(new Date().toISOString().split('T')[0])
   
@@ -108,7 +113,6 @@ export default function ClientesParticularesPage() {
     setLoading(false)
   }
 
-  // Cargar historial de visitas del cliente seleccionado cuando cambia en el modal de arriendo
   const fetchHistorialVisitas = async (clienteId: string) => {
     if (!clienteId) return
     const { data } = await supabase
@@ -127,7 +131,7 @@ export default function ClientesParticularesPage() {
   }, [])
 
   useEffect(() => {
-    if (isArriendoModalOpen) {
+    if (isArriendoModalOpen && !editingVisitaId) {
       cargarHoraActualChile()
     }
   }, [isArriendoModalOpen])
@@ -148,6 +152,12 @@ export default function ClientesParticularesPage() {
     setObsCliente('')
   }
 
+  const resetFormularioArriendo = () => {
+    setEditingVisitaId(null)
+    setVoucherFile(null)
+    setEstadoPago('Pagado')
+  }
+
   const handleAbrirEditarCliente = (c: ClienteParticular) => {
     setEditingClienteId(c.id)
     setNombreCompleto(c.nombre_completo || '')
@@ -159,6 +169,19 @@ export default function ClientesParticularesPage() {
     setIsClienteModalOpen(true)
   }
 
+  // Cargar datos de una visita existente para poder editarla
+  const handleSeleccionarVisitaParaEditar = (visita: UsoOficina) => {
+    setEditingVisitaId(visita.id)
+    setOficina(visita.oficina_asignada || 'Oficina 1')
+    setFechaIngreso(visita.fecha_inicio || new Date().toISOString().split('T')[0])
+    setFechaTermino(visita.fecha_fin || new Date().toISOString().split('T')[0])
+    setHoraIngreso(visita.hora_inicio || '09:00')
+    setHoraSalida(visita.hora_fin || '10:00')
+    setModalidad(visita.modalidad || 'Por hora')
+    setEstadoPago(visita.estado_pago || 'Pagado')
+    setBasesAceptadas(true)
+  }
+
   const verificarDisponibilidad = async () => {
     const { data: empresasActivas } = await supabase
       .from('oficinas_fisicas')
@@ -167,9 +190,9 @@ export default function ClientesParticularesPage() {
     
     const { data: reservasCruzadas } = await supabase
       .from('uso_oficinas_particulares')
-      .select('oficina_asignada, hora_inicio, hora_fin')
+      .select('id, oficina_asignada, hora_inicio, hora_fin')
       .eq('fecha_inicio', fechaIngreso)
-
+    
     const bloqueos: Record<string, string> = {}
     if (empresasActivas) {
       empresasActivas.forEach(e => {
@@ -178,6 +201,8 @@ export default function ClientesParticularesPage() {
     }
     if (reservasCruzadas) {
       reservasCruzadas.forEach(r => {
+        // Si estamos editando la misma visita, no debe bloquearse a sí misma
+        if (editingVisitaId && r.id === editingVisitaId) return
         if (r.hora_inicio && r.hora_fin) {
           const hayTraslape = horaIngreso < r.hora_fin && horaSalida > r.hora_inicio
           if (hayTraslape) {
@@ -279,7 +304,32 @@ export default function ClientesParticularesPage() {
     if (oficinasBloqueadas.includes(oficina)) {
       return alert(`La ${oficina} no está disponible en este horario (${detallesBloqueo[oficina]}).`)
     }
-    const nuevoArriendoParticular = {
+
+    setUploadingVoucher(true)
+    let finalVoucherUrl = ''
+
+    if (voucherFile) {
+      const fileExt = voucherFile.name.split('.').pop()
+      const fileName = `voucher_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+      const filePath = `${fileName}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('vouchers')
+        .upload(filePath, voucherFile)
+
+      if (uploadError) {
+        setUploadingVoucher(false)
+        return alert('Error al subir el archivo de voucher: ' + uploadError.message)
+      }
+
+      const { data: publicURLData } = supabase.storage
+        .from('vouchers')
+        .getPublicUrl(filePath)
+
+      finalVoucherUrl = publicURLData.publicUrl
+    }
+
+    const payloadArriendo: any = {
       cliente_id: clienteSeleccionadoId,
       oficina_asignada: oficina,
       fecha_inicio: fechaIngreso,
@@ -290,17 +340,31 @@ export default function ClientesParticularesPage() {
       horas_calculadas: horasCalculadas,
       monto_total: Number(valorCalculado),
       estado_pago: estadoPago,
-      voucher_url: voucherUrl,
-      contrato_url: contratoUrl,
       bases_aceptadas: basesAceptadas,
       fecha_aceptacion_bases: fechaAceptacion
     }
-    const { error } = await supabase.from('uso_oficinas_particulares').insert([nuevoArriendoParticular])
+
+    if (finalVoucherUrl) {
+      payloadArriendo.voucher_url = finalVoucherUrl
+    }
+
+    let error;
+    if (editingVisitaId) {
+      const res = await supabase.from('uso_oficinas_particulares').update(payloadArriendo).eq('id', editingVisitaId)
+      error = res.error
+    } else {
+      const res = await supabase.from('uso_oficinas_particulares').insert([payloadArriendo])
+      error = res.error
+    }
+
+    setUploadingVoucher(false)
+
     if (error) {
       alert('Error guardando el arriendo: ' + error.message)
     } else {
-      alert('¡Nueva visita/arriendo registrado y acumulado al historial del cliente con éxito!')
+      alert(editingVisitaId ? '¡Visita actualizada con éxito!' : '¡Nueva visita/arriendo registrado y acumulado con éxito!')
       setIsArriendoModalOpen(false)
+      resetFormularioArriendo()
       fetchHistorialVisitas(clienteSeleccionadoId)
     }
   }
@@ -310,7 +374,6 @@ export default function ClientesParticularesPage() {
     c.rut.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
-  // Total de horas acumuladas por el cliente seleccionado
   const totalHorasAcumuladas = historialVisitasCliente.reduce((acc, curr) => acc + (Number(curr.horas_calculadas) || 0), 0)
 
   return (
@@ -324,7 +387,10 @@ export default function ClientesParticularesPage() {
         </div>
         <div className="flex gap-2">
           <button 
-            onClick={() => setIsArriendoModalOpen(true)}
+            onClick={() => {
+              resetFormularioArriendo()
+              setIsArriendoModalOpen(true)
+            }}
             className="flex items-center gap-2 border border-slate-300 hover:bg-slate-100 text-slate-800 font-bold px-4 py-2 rounded-lg text-xs transition"
           >
             <Calendar size={16} /> + Uso de oficina
@@ -365,7 +431,7 @@ export default function ClientesParticularesPage() {
       <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-3">
         <h3 className="font-bold text-slate-900 text-sm">Registro y cálculo de uso</h3>
         <p className="text-xs text-slate-500">
-          Primero registre al cliente[cite: 13]. Luego presione <strong>+ Uso de oficina</strong>[cite: 13], seleccione la modalidad y escriba la cantidad[cite: 13]. El sistema multiplicará automáticamente la tarifa[cite: 13].
+          Primero registre al cliente. Luego presione <strong>+ Uso de oficina</strong>, seleccione la modalidad y escriba la cantidad. El sistema multiplicará automáticamente la tarifa.
         </p>
         <div className="pt-2 relative max-w-md">
           <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
@@ -410,6 +476,7 @@ export default function ClientesParticularesPage() {
                   <td className="py-3 px-4 text-center space-x-2">
                     <button 
                       onClick={() => {
+                        resetFormularioArriendo()
                         setClienteSeleccionadoId(c.id)
                         setIsArriendoModalOpen(true)
                       }}
@@ -549,13 +616,15 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* 🖤 MODAL 2: REGISTRAR ARRIENDO CON HISTORIAL DE VISITAS ACUMULADAS */}
+      {/* 🖤 MODAL 2: REGISTRAR / EDITAR ARRIENDO CON HISTORIAL */}
       {isArriendoModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="bg-[#181818] text-white px-6 py-4 flex justify-between items-center sticky top-0 z-10">
-              <h3 className="font-bold text-base">Registrar arriendo y acumular horas de visita</h3>
-              <button onClick={() => setIsArriendoModalOpen(false)} className="text-neutral-400 hover:text-white">
+              <h3 className="font-bold text-base">
+                {editingVisitaId ? 'Editar registro de arriendo / pago' : 'Registrar arriendo y acumular horas de visita'}
+              </h3>
+              <button onClick={() => { setIsArriendoModalOpen(false); resetFormularioArriendo(); }} className="text-neutral-400 hover:text-white">
                 <X size={20} />
               </button>
             </div>
@@ -577,8 +646,7 @@ export default function ClientesParticularesPage() {
                     ))}
                   </select>
                 </div>
-
-                {/* Resumen de visitas previas del cliente seleccionado */}
+                
                 <div className="flex flex-wrap justify-between items-center bg-white border border-slate-200 rounded-lg p-3 text-[11px]">
                   <div>
                     <span className="text-slate-500">Visitas registradas: </span>
@@ -590,13 +658,18 @@ export default function ClientesParticularesPage() {
                   </div>
                 </div>
 
-                {/* Desplegable colapsable o listado rápido de últimas visitas */}
                 {historialVisitasCliente.length > 0 && (
                   <div className="space-y-1">
-                    <p className="font-bold text-slate-600 text-[10px] uppercase tracking-wider">Historial de últimas visitas de este cliente:</p>
+                    <p className="font-bold text-slate-600 text-[10px] uppercase tracking-wider">
+                      Historial de visitas (Haz clic en una para editarla o cambiar su estado a Pagado):
+                    </p>
                     <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
                       {historialVisitasCliente.map((visita) => (
-                        <div key={visita.id} className="flex justify-between items-center bg-white px-3 py-1.5 rounded border border-slate-100 text-[11px]">
+                        <div 
+                          key={visita.id} 
+                          onClick={() => handleSeleccionarVisitaParaEditar(visita)}
+                          className={`flex justify-between items-center bg-white px-3 py-1.5 rounded border cursor-pointer transition ${editingVisitaId === visita.id ? 'border-[#C5A059] bg-amber-50/60 ring-1 ring-[#C5A059]' : 'border-slate-100 hover:bg-slate-100'}`}
+                        >
                           <span>📅 {visita.fecha_inicio} ({visita.hora_inicio} - {visita.hora_fin})</span>
                           <span className="font-semibold text-slate-700">{visita.oficina_asignada} [{visita.horas_calculadas}h]</span>
                           <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${visita.estado_pago === 'Pagado' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
@@ -607,9 +680,17 @@ export default function ClientesParticularesPage() {
                     </div>
                   </div>
                 )}
+                {editingVisitaId && (
+                  <div className="flex justify-between items-center bg-amber-100/70 border border-amber-300 p-2 rounded-lg text-[11px] text-amber-900">
+                    <span>✏️ Estás editando una visita seleccionada del historial.</span>
+                    <button type="button" onClick={() => resetFormularioArriendo()} className="underline font-bold hover:text-amber-950">
+                      Cancelar edición / Crear nueva
+                    </button>
+                  </div>
+                )}
               </div>
 
-              {/* Formulario de la nueva visita */}
+              {/* Formulario de la visita */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Oficina *</label>
@@ -664,7 +745,7 @@ export default function ClientesParticularesPage() {
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Estado del pago</label>
-                  <select value={estadoPago} onChange={(e) => setEstadoPago(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white">
+                  <select value={estadoPago} onChange={(e) => setEstadoPago(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white font-bold text-amber-700">
                     <option value="Pagado">Pagado</option>
                     <option value="Pendiente">Pendiente</option>
                   </select>
@@ -675,25 +756,37 @@ export default function ClientesParticularesPage() {
                 {horaIngreso} a {horaSalida} · {Math.round(horasCalculadas * 60)} minutos ({horasCalculadas} h) × ${modalidad === 'Por hora' ? '3.000 /h ($50/min)' : 'Tarifa fija'} = ${valorCalculado.toLocaleString('es-CL')}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Voucher / enlace</label>
-                  <input type="text" placeholder="URL o referencia del archivo" value={voucherUrl} onChange={(e) => setVoucherUrl(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
+              {/* SECCIÓN VOUCHER COMO ARCHIVO */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Comprobante de pago / Voucher (Archivo)</label>
+                <div className="flex items-center gap-2 border border-slate-300 rounded-lg p-2 bg-white">
+                  <Upload size={16} className="text-slate-400 shrink-0" />
+                  <input 
+                    type="file" 
+                    accept="image/*,.pdf"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        setVoucherFile(e.target.files[0])
+                      }
+                    }}
+                    className="w-full text-xs text-slate-500 file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-bold file:bg-[#C5A059] file:text-slate-950 hover:file:bg-[#b59049]" 
+                  />
                 </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Contrato de arriendo</label>
-                  <input type="text" placeholder="URL o referencia del archivo" value={contratoUrl} onChange={(e) => setContratoUrl(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
-                </div>
+                {voucherFile && (
+                  <p className="mt-1 text-[11px] text-emerald-600 font-medium">
+                    Archivo seleccionado: {voucherFile.name}
+                  </p>
+                )}
               </div>
 
               <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-4 space-y-2">
                 <h4 className="font-bold text-slate-900">Bases y Condiciones de uso físico</h4>
                 <p className="text-slate-600 text-[11px]">
-                  <strong>Documento general cargado por Sutrato:</strong> La empresa o cliente debe leerlo y aceptar sus condiciones antes de guardar el arriendo.
+                  <strong>Documento general cargado por Sutrato:</strong> El cliente debe leerlo y aceptar sus condiciones antes de guardar el arriendo.
                 </p>
                 <div className="flex items-center gap-2 pt-1">
                   <input type="checkbox" id="bases" checked={basesAceptadas} onChange={(e) => setBasesAceptadas(e.target.checked)} className="rounded text-[#C5A059] focus:ring-[#C5A059]" />
-                  <label htmlFor="bases" className="font-bold text-slate-800">Aceptado por la empresa</label>
+                  <label htmlFor="bases" className="font-bold text-slate-800">Aceptado por el cliente</label>
                 </div>
                 {basesAceptadas && (
                   <div className="pt-1">
@@ -704,11 +797,11 @@ export default function ClientesParticularesPage() {
               </div>
 
               <div className="pt-2 flex justify-end gap-2">
-                <button type="button" onClick={() => setIsArriendoModalOpen(false)} className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700 hover:bg-slate-50 transition">
+                <button type="button" onClick={() => { setIsArriendoModalOpen(false); resetFormularioArriendo(); }} className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700 hover:bg-slate-50 transition">
                   Cancelar
                 </button>
-                <button type="submit" className="bg-[#C5A059] hover:bg-[#b59049] text-slate-950 font-bold px-6 py-2 rounded-lg shadow transition">
-                  Registrar nueva visita y acumular
+                <button type="submit" disabled={uploadingVoucher} className="bg-[#C5A059] hover:bg-amber-600 disabled:opacity-50 text-slate-950 font-bold px-6 py-2 rounded-lg shadow transition">
+                  {uploadingVoucher ? 'Subiendo archivo...' : editingVisitaId ? 'Actualizar registro de arriendo' : 'Registrar nueva visita y acumular'}
                 </button>
               </div>
             </form>
