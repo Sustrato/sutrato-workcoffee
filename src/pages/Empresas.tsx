@@ -1152,7 +1152,7 @@ export default function Empresas() {
             </div>
             <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-4 py-4 sm:flex-row sm:justify-end sm:px-6">
               <button type="button" onClick={() => { setPagoToDelete(null); setDeletePagoConfirmation(''); setDeletePagoError('') }} disabled={isDeletingPago} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
-              <button type="button" onClick={() => void handleDeletePago()} disabled={isDeletingPago || deletePagoConfirmation !== 'Eliminar'} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50">
+              <button type="button" onClick={() => void handleDeletePago()} disabled={isDeletingPago || deletePagoConfirmation !== 'ELIMINAR'} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50">
                 {isDeletingPago ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
                 {isDeletingPago ? 'Eliminando...' : 'Eliminar pago'}
               </button>

@@ -1,18 +1,20 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { Plus, X, Trash2, CreditCard, ExternalLink, Search, FileText, Edit2, Send, CheckCircle2, Clock } from 'lucide-react'
+import { Plus, X, Trash2, CreditCard, ExternalLink, Search, FileText, Edit2, Download, QrCode } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 
 export default function AdministracionComercialPage() {
   const navigate = useNavigate()
   const [arriendos, setArriendos] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
-  const [enviandoZohoId, setEnviandoZohoId] = useState<string | null>(null)
   
   // Modales
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isPagosModalOpen, setIsPagosModalOpen] = useState(false)
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false)
+  const [empresaQrSeleccionada, setEmpresaQrSeleccionada] = useState<any>(null)
   
   // Estado para saber si estamos Creando o Editando
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -22,7 +24,6 @@ export default function AdministracionComercialPage() {
   const [historialPagos, setHistorialPagos] = useState<any[]>([])
   const [loadingPagos, setLoadingPagos] = useState(false)
   const [uploading, setUploading] = useState(false)
-
   // Formulario "Nueva empresa / Editar empresa"
   const [empresa, setEmpresa] = useState('')
   const [rutEmpresa, setRutEmpresa] = useState('')
@@ -36,7 +37,6 @@ export default function AdministracionComercialPage() {
   const [frecuencia, setFrecuencia] = useState('MENSUAL')
   const [montoMensual, setMontoMensual] = useState('350000')
   const [vigencia, setVigencia] = useState('VIGENTE')
-
   // Formulario "Registrar pago"
   const [fechaPago, setFechaPago] = useState(new Date().toISOString().split('T')[0])
   const [formaPago, setFormaPago] = useState('Transferencia')
@@ -46,19 +46,17 @@ export default function AdministracionComercialPage() {
   
   // Archivo único para comprobante de pago
   const [comprobanteFile, setComprobanteFile] = useState<File | null>(null)
-
+  
   // Lista base de oficinas privadas
   const listaOficinas = ['Oficina 1', 'Oficina 2', 'Oficina 3', 'Oficina 4', 'Oficina 5', 'Oficina 6', 'Oficina 7']
   
-  // Detectar oficinas ocupadas por contratos activos
+  // Detectar oficinas ocupadas por contratos activos (excluyendo la empresa que se está editando)
   const oficinasOcupadas = arriendos
     .filter(a => a.estado === 'Activo' && a.id !== editingId)
     .map(a => a.tipo_espacio)
-
   // Cálculos de IVA y Neto
   const netoCalculado = Math.round(montoBruto / 1.19)
   const ivaCalculado = montoBruto - netoCalculado
-
   const fetchArriendos = async () => {
     setLoading(true)
     const { data } = await supabase
@@ -68,11 +66,9 @@ export default function AdministracionComercialPage() {
     if (data) setArriendos(data)
     setLoading(false)
   }
-
   useEffect(() => {
     fetchArriendos()
   }, [])
-
   // Limpiar formulario de empresa
   const resetFormularioEmpresa = () => {
     setEditingId(null)
@@ -90,7 +86,6 @@ export default function AdministracionComercialPage() {
     const primeraDisponible = listaOficinas.find(of => !oficinasOcupadas.includes(of))
     if (primeraDisponible) setTipoEspacio(primeraDisponible)
   }
-
   // Cargar datos para EDITAR
   const handleAbrirEditar = (a: any) => {
     setEditingId(a.id)
@@ -109,6 +104,24 @@ export default function AdministracionComercialPage() {
     setIsModalOpen(true)
   }
 
+  // 📄 Ver el Payload de Zoho como si fuera un archivo descargable o vista previa
+  const handleVerZohoPayload = (empresaItem: any) => {
+    if (!empresaItem.zoho_payload) {
+      alert("Este cliente aún no ha enviado el formulario de Zoho.")
+      return
+    }
+    const jsonString = JSON.stringify(empresaItem.zoho_payload, null, 2)
+    const blob = new Blob([jsonString], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+  }
+
+  // 📱 Abrir Modal QR
+  const handleAbrirQr = (empresaItem: any) => {
+    setEmpresaQrSeleccionada(empresaItem)
+    setIsQrModalOpen(true)
+  }
+
   // Auto-calcular fecha del próximo pago según frecuencia
   useEffect(() => {
     if (fechaPago) {
@@ -121,8 +134,7 @@ export default function AdministracionComercialPage() {
       setProximoPago(d.toISOString().split('T')[0])
     }
   }, [fechaPago, frecuencia])
-
-  // Cargar el historial de pagos
+  // Cargar el historial de pagos de la empresa seleccionada
   const fetchHistorialPagos = async (empresaId: string) => {
     setLoadingPagos(true)
     const { data } = await supabase
@@ -133,7 +145,6 @@ export default function AdministracionComercialPage() {
     if (data) setHistorialPagos(data)
     setLoadingPagos(false)
   }
-
   const handleAbrirPagos = (empresaItem: any) => {
     setEmpresaSeleccionada(empresaItem)
     setMontoBruto(empresaItem.monto_mensual || 350000)
@@ -143,7 +154,6 @@ export default function AdministracionComercialPage() {
     setIsPagosModalOpen(true)
     fetchHistorialPagos(empresaItem.id)
   }
-
   // 📄 Abrir o Generar Contrato seguro
   const handleAbrirContrato = async (empresaItem: any) => {
     if (empresaItem.contrato_url) {
@@ -179,34 +189,6 @@ export default function AdministracionComercialPage() {
       navigate(`/oficinas-fisicas/plantilla-contrato?${queryParams}`)
     }
   }
-
-  // 🚀 Enviar datos a Zoho Forms mediante la Edge Function de Supabase
-  const handleEnviarAZoho = async (empresaItem: any) => {
-    if (!empresaItem.rut_empresa) {
-      return alert('La empresa no tiene un RUT registrado para procesar la sincronización.')
-    }
-
-    if (!confirm(`¿Deseas procesar y enviar la aceptación de términos de "${empresaItem.nombre_cliente}" hacia Zoho Forms?`)) {
-      return
-    }
-
-    setEnviandoZohoId(empresaItem.id)
-    try {
-    const { error } = await supabase.functions.invoke('enviar-zoho-form', {
-  body: { rut_empresa: empresaItem.rut_empresa }
-})
-
-      if (error) throw error
-
-      alert('¡Términos sincronizados y enviados a Zoho Forms correctamente!')
-      fetchArriendos()
-    } catch (err: any) {
-      alert('Error al sincronizar con Zoho: ' + (err.message || 'Error desconocido'))
-    } finally {
-      setEnviandoZohoId(null)
-    }
-  }
-
   // Subir archivo a Supabase Storage
   const uploadFile = async (file: File, folder: string) => {
     const fileExt = file.name.split('.').pop()
@@ -224,7 +206,6 @@ export default function AdministracionComercialPage() {
       .getPublicUrl(fileName)
     return data.publicUrl
   }
-
   // 💾 Guardar (Crear o Editar Empresa)
   const handleGuardarEmpresa = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -273,7 +254,6 @@ export default function AdministracionComercialPage() {
       alert('Error al guardar la empresa: ' + error.message)
     }
   }
-
   // Registrar pago de arriendo y comprobante
   const handleGuardarPago = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -324,7 +304,6 @@ export default function AdministracionComercialPage() {
       alert('Error guardando el pago: ' + (errPago?.message || errEmpresa?.message))
     }
   }
-
   const handleEliminarPago = async (pagoId: string) => {
     if (!confirm('¿Seguro que deseas eliminar este registro de pago?')) return
     const { error } = await supabase
@@ -338,8 +317,6 @@ export default function AdministracionComercialPage() {
       alert('Error al eliminar el pago: ' + error.message)
     }
   }
-
-  // 🚨 Confirmación estricta al ELIMINAR una Empresa
   const handleEliminar = async (empresaItem: any) => {
     const confirmacion = prompt(
       `⚠️ ATENCIÓN: Esta acción eliminará permanentemente la empresa "${empresaItem.nombre_cliente}" y sus contratos/pagos asociados.\n\nEscribe "ELIMINAR" en mayúsculas para confirmar:`
@@ -356,12 +333,10 @@ export default function AdministracionComercialPage() {
       alert('Confirmación incorrecta. No se realizaron cambios.')
     }
   }
-
   const arriendosFiltrados = arriendos.filter(a =>
     a.nombre_cliente.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (a.rut_empresa && a.rut_empresa.toLowerCase().includes(searchTerm.toLowerCase()))
   )
-
   return (
     <div className="mx-auto max-w-7xl space-y-7 font-sans">
       
@@ -394,7 +369,6 @@ export default function AdministracionComercialPage() {
           </button>
         </div>
       </section>
-
       {/* Tabla Comercial */}
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <table className="w-full text-left border-collapse">
@@ -435,24 +409,30 @@ export default function AdministracionComercialPage() {
                       {a.frecuencia || 'MENSUAL'}
                     </span>
                   </td>
-                  {/* 🟢 ESTADO TÉRMINOS & ZOHO */}
+                  {/* 🟢 COLUMNA TÉRMINOS / ZOHO */}
                   <td className="py-4 px-4">
-                    <div className="flex flex-col gap-1">
-                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full w-fit ${
+                    <div className="flex flex-col gap-1 items-start">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                         a.terminos_aceptados 
                           ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
                           : 'bg-amber-100 text-amber-800 border border-amber-200'
                       }`}>
-                        {a.terminos_aceptados ? <CheckCircle2 size={10} /> : <Clock size={10} />}
-                        {a.terminos_aceptados ? 'Aceptado' : 'Pendiente'}
+                        {a.terminos_aceptados ? '• Aceptado' : '• Pendiente'}
                       </span>
                       <button
-                        onClick={() => handleEnviarAZoho(a)}
-                        disabled={enviandoZohoId === a.id}
-                        className="text-[10px] text-blue-600 hover:underline font-bold flex items-center gap-1 disabled:opacity-50"
+                        onClick={() => handleAbrirQr(a)}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#C5A059] hover:underline transition"
                       >
-                        <Send size={10} /> {enviandoZohoId === a.id ? 'Enviando...' : 'Sincronizar Zoho'}
+                        <QrCode size={12} /> Ver QR
                       </button>
+                      {a.zoho_payload && (
+                        <button
+                          onClick={() => handleVerZohoPayload(a)}
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-600 hover:text-purple-800 transition"
+                        >
+                          <Download size={11} /> Ver respaldo Zoho
+                        </button>
+                      )}
                     </div>
                   </td>
                   <td className="py-4 px-4 text-center">
@@ -487,6 +467,7 @@ export default function AdministracionComercialPage() {
                     >
                       <CreditCard size={14} /> Pagos
                     </button>
+                    
                     <button 
                       onClick={() => handleAbrirEditar(a)}
                       className="p-1.5 text-slate-600 hover:text-slate-900 border border-slate-200 rounded-lg hover:bg-slate-100 align-middle transition"
@@ -509,6 +490,44 @@ export default function AdministracionComercialPage() {
         </table>
       </section>
 
+      {/* 📱 MODAL DE CÓDIGO QR */}
+      {isQrModalOpen && empresaQrSeleccionada && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl p-6 text-center space-y-4">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="font-black text-slate-900 text-base">QR de Aceptación de Términos</h3>
+              <button onClick={() => setIsQrModalOpen(false)} className="text-slate-400 hover:text-slate-700">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <p className="text-xs text-slate-500">
+              Escanea el código para precargar los datos de <strong>{empresaQrSeleccionada.nombre_cliente}</strong> en el formulario de Zoho.
+            </p>
+
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-center">
+              <QRCodeSVG 
+                value={`https://forms.zohopublic.com/rotaryconcordia1/form/Aceptacionterminossutrato/formperma/dEiuFyNghAj8CFZhy7d5P7knBvun9DFBkH6HX0l2Bh4?zf_lang=en&Field_3=${encodeURIComponent(empresaQrSeleccionada.rut_representante || '')}&Field_4=${encodeURIComponent(empresaQrSeleccionada.telefono || '')}&Field_5=${encodeURIComponent(empresaQrSeleccionada.correo || '')}&Field_6=${encodeURIComponent(empresaQrSeleccionada.nombre_cliente || '')}&Field_7=${encodeURIComponent(empresaQrSeleccionada.rut_empresa || '')}&Field_9=${encodeURIComponent(empresaQrSeleccionada.tipo_espacio || '')}`} 
+                size={180} 
+              />
+            </div>
+
+            <div className="text-left bg-blue-50/60 p-3 rounded-lg text-[11px] text-slate-700 space-y-1">
+              <p><strong>Representante:</strong> {empresaQrSeleccionada.representante_legal || '—'} ({empresaQrSeleccionada.rut_representante || '—'})</p>
+              <p><strong>Empresa:</strong> {empresaQrSeleccionada.nombre_cliente} ({empresaQrSeleccionada.rut_empresa})</p>
+              <p><strong>Oficina:</strong> {empresaQrSeleccionada.tipo_espacio}</p>
+            </div>
+
+            <button 
+              onClick={() => setIsQrModalOpen(false)}
+              className="w-full bg-[#181818] text-[#C5A059] font-bold py-2 rounded-lg text-xs hover:bg-black transition"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 🖤 MODAL 1: NUEVA / EDITAR EMPRESA */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
@@ -528,7 +547,7 @@ export default function AdministracionComercialPage() {
                   <input type="text" value={empresa} onChange={(e) => setEmpresa(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">RUT empresa * (ej: 18869385-7)</label>
+                  <label className="block font-bold text-slate-700 mb-1">RUT empresa *</label>
                   <input type="text" value={rutEmpresa} onChange={(e) => setRutEmpresa(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
                 </div>
                 <div>
@@ -615,7 +634,6 @@ export default function AdministracionComercialPage() {
           </div>
         </div>
       )}
-
       {/* 🖤 MODAL 2: CONTROL DE PAGOS */}
       {isPagosModalOpen && empresaSeleccionada && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
@@ -633,6 +651,8 @@ export default function AdministracionComercialPage() {
             </div>
             
             <div className="p-6 space-y-6 text-xs">
+              
+              {/* Historial de Pagos */}
               <div>
                 <h4 className="font-bold text-slate-800 mb-2">Pagos e historial registrado ({historialPagos.length})</h4>
                 <div className="border border-slate-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
@@ -686,7 +706,6 @@ export default function AdministracionComercialPage() {
                   </table>
                 </div>
               </div>
-
               {/* Formulario de Pago */}
               <form onSubmit={handleGuardarPago} className="space-y-4 border-t border-slate-100 pt-5">
                 <h4 className="font-bold text-slate-900 text-sm">Datos del pago</h4>
@@ -726,7 +745,7 @@ export default function AdministracionComercialPage() {
                     />
                   </div>
                 </div>
-                <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
                   <div>
                     <p className="text-[10px] font-semibold text-slate-500">Monto bruto</p>
                     <p className="font-extrabold text-slate-900 text-sm mt-0.5">${montoBruto.toLocaleString('es-CL')}</p>
