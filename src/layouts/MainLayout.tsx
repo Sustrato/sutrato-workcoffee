@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { EMPRESAS_UPDATED_EVENT } from '../services/siiNotices'
 import { getNotificationFeed, PAYMENTS_UPDATED_EVENT, type NotificationFeed } from '../services/notifications'
+import { supabase } from '../services/supabase'
 
 const navigationOficinas = [
   { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, end: true },
@@ -54,7 +55,38 @@ export default function MainLayout() {
   const [notificationError, setNotificationError] = useState('')
   const [notificationFeed, setNotificationFeed] = useState<NotificationFeed>({ alerts: [], recentPayments: [] })
   
+  const [userEmail, setUserEmail] = useState<string>('')
+  const [isOfFisicaOnly, setIsOfFisicaOnly] = useState<boolean>(false)
+
   const alertCount = notificationFeed.alerts.length
+
+  // Obtener datos del usuario y rol activo
+  useEffect(() => {
+    async function fetchUserRoleAndEmail() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user) {
+        const email = session.user.email ?? ''
+        setUserEmail(email)
+
+        const { data: roleData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', session.user.id)
+        
+        const hasOfFisica = roleData?.some((r) => r.role === 'OfFisica')
+        const isGenericOffice = email.toLowerCase() === 'oficinassutrato@zohomail.com'
+
+        if (hasOfFisica || isGenericOffice) {
+          setIsOfFisicaOnly(true)
+          // Si entra a una ruta general, redirigirlo directo al resumen de oficinas físicas
+          if (location.pathname === '/' || location.pathname === '/dashboard' || location.pathname === '/documentos') {
+            navigate('/oficinas-fisicas/resumen', { replace: true })
+          }
+        }
+      }
+    }
+    void fetchUserRoleAndEmail()
+  }, [location.pathname, navigate])
 
   // Detectar el módulo activo según la ruta actual
   const currentModule = location.pathname.startsWith('/oficinas-fisicas') 
@@ -111,10 +143,11 @@ export default function MainLayout() {
 
   function openNotification() {
     setIsNotificationsOpen(false)
-    navigate('/documentos')
+    navigate(isOfFisicaOnly ? '/oficinas-fisicas/resumen' : '/documentos')
   }
 
   const handleModuleSwitch = (module: 'oficinas' | 'fisicas' | 'catering') => {
+    if (isOfFisicaOnly) return
     if (module === 'oficinas') {
       navigate('/dashboard')
     } else if (module === 'fisicas') {
@@ -124,18 +157,22 @@ export default function MainLayout() {
     }
   }
 
-  const activeNavigation = 
-    currentModule === 'oficinas' 
+  // RESTRICCIÓN ABSOLUTA: Si es OfFisica, se fuerza exclusivamente su menú lateral
+  const activeNavigation = isOfFisicaOnly
+    ? navigationOficinasFisicas
+    : currentModule === 'oficinas' 
       ? navigationOficinas 
       : currentModule === 'fisicas' 
         ? navigationOficinasFisicas 
         : navigationCatering
 
+  // Generar iniciales para el avatar
+  const userInitials = userEmail ? userEmail.substring(0, 2).toUpperCase() : 'US'
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
-      
       <aside className={`fixed inset-y-0 left-0 z-20 hidden w-64 flex-col border-r border-slate-200 md:flex print:hidden ${
-        currentModule === 'fisicas'
+        currentModule === 'fisicas' || isOfFisicaOnly
           ? 'bg-primary-50/20' 
           : currentModule === 'catering'
             ? 'bg-orange-50/30'
@@ -152,12 +189,10 @@ export default function MainLayout() {
             <p className="text-xs text-slate-500">Gestor Administrativo</p>
           </div>
         </div>
-
         <nav aria-label="Navegación principal" className="flex-1 space-y-1 px-3 py-6">
           <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
             Menú principal
           </p>
-
           {activeNavigation.map(({ label, to, icon: Icon, end }) => (
             <NavLink
               key={to}
@@ -166,7 +201,7 @@ export default function MainLayout() {
               className={({ isActive }) =>
                 `group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                   isActive
-                    ? currentModule === 'catering'
+                    ? currentModule === 'catering' && !isOfFisicaOnly
                       ? 'bg-orange-100 text-orange-900 border-l-4 border-orange-600 font-bold'
                       : 'bg-primary-50 text-primary-700 font-bold'
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -185,7 +220,6 @@ export default function MainLayout() {
             </NavLink>
           ))}
         </nav>
-
         <div className="m-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
           <p className="text-xs font-semibold text-slate-700">Centro de documentos</p>
           <p className="mt-1 text-xs leading-5 text-slate-500">
@@ -193,42 +227,42 @@ export default function MainLayout() {
           </p>
         </div>
       </aside>
-
       <div className="md:pl-64">
         <header className="app-navbar sticky top-0 z-30 flex h-20 items-center justify-between gap-4 border-b border-slate-200 bg-white/95 px-4 backdrop-blur sm:px-8 print:hidden">
-          
           <div className="flex items-center gap-4">
             
-            {/* SELECTOR DE MÓDULOS SUPERIOR */}
-            <div className="flex bg-slate-100 p-1 rounded-xl">
-              <button 
-                type="button"
-                onClick={() => handleModuleSwitch('oficinas')}
-                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-                  currentModule === 'oficinas' ? 'bg-white shadow-sm text-slate-900 font-semibold' : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                Oficinas Virtuales
-              </button>
-              <button 
-                type="button"
-                onClick={() => handleModuleSwitch('fisicas')}
-                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-                  currentModule === 'fisicas' ? 'bg-white shadow-sm text-slate-900 font-semibold' : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                Oficinas Físicas
-              </button>
-              <button 
-                type="button"
-                onClick={() => handleModuleSwitch('catering')}
-                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-                  currentModule === 'catering' ? 'bg-white shadow-sm text-orange-900 font-semibold' : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                Coffee & Catering
-              </button>
-            </div>
+            {/* SELECTOR DE MÓDULOS SUPERIOR (Se oculta por completo si es OfFisica) */}
+            {!isOfFisicaOnly && (
+              <div className="flex bg-slate-100 p-1 rounded-xl">
+                <button 
+                  type="button"
+                  onClick={() => handleModuleSwitch('oficinas')}
+                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                    currentModule === 'oficinas' ? 'bg-white shadow-sm text-slate-900 font-semibold' : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  Oficinas Virtuales
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => handleModuleSwitch('fisicas')}
+                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                    currentModule === 'fisicas' ? 'bg-white shadow-sm text-slate-900 font-semibold' : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  Oficinas Físicas
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => handleModuleSwitch('catering')}
+                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                    currentModule === 'catering' ? 'bg-white shadow-sm text-orange-900 font-semibold' : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  Coffee & Catering
+                </button>
+              </div>
+            )}
 
             <div ref={notificationsRef} className="relative">
               <button
@@ -242,7 +276,6 @@ export default function MainLayout() {
                 <Bell size={19} />
                 {alertCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-white bg-rose-600 px-0.5 text-[9px] font-bold leading-none text-white">{alertCount > 9 ? '9+' : alertCount}</span>}
               </button>
-
               {isNotificationsOpen && (
                 <section id="notifications-panel" role="dialog" aria-label="Notificaciones recientes" className="absolute left-0 right-auto top-12 z-50 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl shadow-slate-900/15">
                   <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
@@ -290,16 +323,15 @@ export default function MainLayout() {
             <div className="hidden h-8 w-px bg-slate-200 sm:block" />
             <div className="flex items-center gap-3">
               <div className="flex size-9 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700">
-                GE
+                {userInitials}
               </div>
               <div className="hidden sm:block">
-                <p className="text-sm font-semibold leading-5 text-slate-800">gerencia@sutrato.com</p>
-                <p className="text-xs leading-4 text-slate-500">Usuario activo</p>
+                <p className="text-sm font-semibold leading-5 text-slate-800">{userEmail || 'Cargando...'}</p>
+                <p className="text-xs leading-4 text-slate-500">{isOfFisicaOnly ? 'Oficina Física' : 'Usuario activo'}</p>
               </div>
             </div>
           </div>
         </header>
-
         <nav aria-label="Navegación principal" className="sticky top-20 z-20 border-b border-slate-200 bg-white px-4 py-2 md:hidden print:hidden">
           <div className="flex min-w-0 gap-1 overflow-x-auto">
             {activeNavigation.map(({ label, to, icon: Icon, end }) => (
@@ -321,7 +353,6 @@ export default function MainLayout() {
             ))}
           </div>
         </nav>
-
         <main className="min-h-[calc(100vh-5rem)] min-w-0 p-4 sm:p-8 print:min-h-0 print:p-0">
           <Outlet />
         </main>

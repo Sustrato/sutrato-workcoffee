@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { ArrowRight, Eye, EyeOff, LockKeyhole, LoaderCircle, Mail, ShieldCheck, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
-
 import { supabase } from '../services/supabase'
 import { checkTrustedDevice, verifyTrustedDevice } from '../services/trustedDevices'
 
@@ -50,24 +49,61 @@ export default function Login() {
         setErrorMessage('No se pudo iniciar sesión. Intenta nuevamente.')
         return
       }
+
       sessionCreated = true
 
-      const deviceStatus = await checkTrustedDevice()
-      if (deviceStatus.trusted) {
+      // --- BYPASS TOTAL PARA CORREO DE OFICINA O ROL OFICIAL ---
+      if (email.trim().toLowerCase() === 'oficinassutrato@zohomail.com') {
         navigate('/dashboard', { replace: true })
         return
       }
-      if (!deviceStatus.verificationRequired || !deviceStatus.challengeId) {
-        throw new Error('El servicio no devolvió una verificación válida para este dispositivo.')
-      }
 
-      const { error: signOutError } = await supabase.auth.signOut()
-      if (signOutError) throw signOutError
-      sessionCreated = false
-      setVerification({ challengeId: deviceStatus.challengeId, email: deviceStatus.email ?? data.session.user.email ?? '' })
-      setVerificationCode('')
-      setVerificationError('')
-      setVerificationSuccess('')
+      try {
+        const { data: roleData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', data.session.user.id)
+
+        const isOfFisica = roleData?.some((r) => r.role === 'OfFisica')
+        if (isOfFisica) {
+          navigate('/dashboard', { replace: true })
+          return
+        }
+
+        const deviceStatus = await checkTrustedDevice()
+        if (deviceStatus.trusted) {
+          navigate('/dashboard', { replace: true })
+          return
+        }
+
+        if (!deviceStatus.verificationRequired || !deviceStatus.challengeId) {
+          throw new Error('El servicio no devolvió una verificación válida para este dispositivo.')
+        }
+
+        const { error: signOutError } = await supabase.auth.signOut()
+        if (signOutError) throw signOutError
+        sessionCreated = false
+
+        setVerification({ challengeId: deviceStatus.challengeId, email: deviceStatus.email ?? data.session.user.email ?? '' })
+        setVerificationCode('')
+        setVerificationError('')
+        setVerificationSuccess('')
+        return
+      } catch (deviceCheckError) {
+        // Si la función falla por falta de SMTP o red, permitimos el paso si es OfFisica
+        const { data: roleData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', data.session.user.id)
+
+        const isOfFisica = roleData?.some((r) => r.role === 'OfFisica')
+        if (isOfFisica) {
+          navigate('/dashboard', { replace: true })
+          return
+        }
+
+        throw deviceCheckError
+      }
     } catch (authError) {
       console.error('Error al iniciar sesión:', authError)
       if (sessionCreated) {
@@ -83,6 +119,7 @@ export default function Login() {
   async function handleVerificationSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!verification || verificationCode.length !== 6 || isVerifying) return
+
     setIsVerifying(true)
     setVerificationError('')
     setVerificationSuccess('')
@@ -101,6 +138,7 @@ export default function Login() {
 
       setIsSubmitting(true)
       setVerificationSuccess('Dispositivo verificado. Completando el inicio de sesión...')
+
       try {
         const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
         if (error) throw new Error(error.message || 'No se pudo completar el inicio de sesión.')
@@ -109,6 +147,7 @@ export default function Login() {
 
         const deviceStatus = await checkTrustedDevice()
         if (!deviceStatus.trusted) throw new Error('No se pudo confirmar el dispositivo después de validarlo.')
+
         navigate('/dashboard', { replace: true })
       } catch (reauthError) {
         if (sessionCreated) {
@@ -152,7 +191,6 @@ export default function Login() {
               <p className="text-xs text-blue-100">Gestión Administrativa</p>
             </div>
           </div>
-
           <div className="my-12 max-w-md">
             <p className="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-blue-200">
               PLATAFORMA INTEGRAL DE GESTIÓN
@@ -164,13 +202,11 @@ export default function Login() {
               Controla empresas, contratos, flujos mensuales, anuales y reportes gerenciales desde un solo lugar.
             </p>
           </div>
-
           <div className="flex items-center gap-2 text-xs text-blue-100">
             <ShieldCheck size={16} />
             <span>Acceso seguro a la documentación de tu empresa</span>
           </div>
         </section>
-
         <section className="flex items-center justify-center px-6 py-10 sm:px-12 lg:px-14">
           <div className="w-full max-w-sm">
             <div className="mb-8">
@@ -179,7 +215,6 @@ export default function Login() {
                 Ingresa tus credenciales para acceder.
               </p>
             </div>
-
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label htmlFor="email" className="mb-2 block text-sm font-medium text-slate-700">
@@ -201,7 +236,6 @@ export default function Login() {
                   />
                 </div>
               </div>
-
               <div>
                 <label htmlFor="password" className="mb-2 block text-sm font-medium text-slate-700">
                   Contraseña
@@ -232,14 +266,12 @@ export default function Login() {
                   </button>
                 </div>
               </div>
-
               {errorMessage && (
                 <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
                   {errorMessage}
                 </p>
               )}
               {verificationSuccess && <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-700">{verificationSuccess}</p>}
-
               <button
                 type="submit"
                 disabled={isSubmitting || Boolean(verification)}
@@ -249,14 +281,12 @@ export default function Login() {
                 {isSubmitting ? <LoaderCircle size={17} className="animate-spin" /> : <ArrowRight size={17} />}
               </button>
             </form>
-
             <p className="mt-6 text-center text-xs leading-5 text-slate-500">
               Tus credenciales se validan de forma segura mediante Supabase. Los dispositivos nuevos requieren un código enviado a tu correo.
             </p>
           </div>
         </section>
       </div>
-
       {verification && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-[2px]">
           <section role="alertdialog" aria-modal="true" aria-labelledby="trusted-device-title" aria-describedby="trusted-device-description" className="my-auto w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">

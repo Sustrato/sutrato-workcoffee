@@ -24,6 +24,26 @@ export default function TrustedDeviceGate() {
         return
       }
 
+      // --- BYPASS TOTAL PARA CORREO DE OFICINA O ROL OFICIAL ---
+      if (data.session.user.email?.toLowerCase() === 'oficinassutrato@zohomail.com') {
+        setStatus('verified')
+        return
+      }
+
+      const { data: roleData, error: roleError } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', data.session.user.id)
+
+      if (!roleError && roleData) {
+        const hasOfFisicaRole = roleData.some((r) => r.role === 'OfFisica')
+        if (hasOfFisicaRole) {
+          setStatus('verified')
+          return
+        }
+      }
+      // ---------------------------------
+
       const result = await checkTrustedDevice()
       if (requestId.current !== currentRequestId) return
       if (result.trusted) {
@@ -47,6 +67,27 @@ export default function TrustedDeviceGate() {
       })
     } catch (checkError) {
       if (requestId.current !== currentRequestId) return
+      
+      // Si ocurre un error (como fallo de SMTP), revisamos si el usuario actual es de oficina física
+      try {
+        const { data: sessionData } = await supabase.auth.getSession()
+        if (sessionData?.session?.user?.email?.toLowerCase() === 'oficinassutrato@zohomail.com') {
+          setStatus('verified')
+          return
+        }
+        const { data: roleData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', sessionData?.session?.user?.id ?? '')
+        
+        if (roleData?.some((r) => r.role === 'OfFisica')) {
+          setStatus('verified')
+          return
+        }
+      } catch {
+        // Ignorar error interno del respaldo
+      }
+
       isRedirectingToVerification.current = false
       console.error('No se pudo verificar el dispositivo:', checkError)
       setError(checkError instanceof Error ? checkError.message : 'No se pudo verificar este dispositivo.')
