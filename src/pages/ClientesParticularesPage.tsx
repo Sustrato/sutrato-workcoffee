@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink } from 'lucide-react'
+import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
 interface ClienteParticular {
@@ -43,7 +42,6 @@ const normalizarRut = (valor: string) => {
 }
 
 export default function ClientesParticularesPage() {
-  const navigate = useNavigate()
   const [clientes, setClientes] = useState<ClienteParticular[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
@@ -129,7 +127,6 @@ export default function ClientesParticularesPage() {
       .select('*')
       .order('created_at', { ascending: false })
       .limit(1000)
-
     if (data) {
       setClientes(data)
       if (data.length > 0 && !clienteSeleccionadoId) {
@@ -545,7 +542,6 @@ export default function ClientesParticularesPage() {
                       >
                         <QrCode size={12} /> Ver QR
                       </button>
-
                       {c.terminos_aceptados && (
                         <button
                           type="button"
@@ -593,7 +589,7 @@ export default function ClientesParticularesPage() {
         </table>
       </section>
 
-      {/* 📱 MODAL DE CÓDIGO QR SOHO (SIN BOTÓN VERDE) */}
+      {/* 📱 MODAL DE CÓDIGO QR */}
       {isQrModalOpen && clienteQrSeleccionado && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl p-6 text-center space-y-4">
@@ -617,7 +613,6 @@ export default function ClientesParticularesPage() {
               <p><strong>Cliente:</strong> {clienteQrSeleccionado.nombre_completo} ({clienteQrSeleccionado.rut})</p>
               <p><strong>Estado actual:</strong> <span className={clienteQrSeleccionado?.terminos_aceptados ? 'text-emerald-700 font-bold' : 'text-amber-700 font-bold'}>{clienteQrSeleccionado?.terminos_aceptados ? 'Aceptado' : 'Pendiente de lectura y envío'}</span></p>
             </div>
-
             <div className="space-y-2 pt-2">
               <button 
                 onClick={() => setIsQrModalOpen(false)}
@@ -813,7 +808,6 @@ export default function ClientesParticularesPage() {
                   </div>
                 )}
               </div>
-
               {/* Formulario de la visita */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -879,7 +873,6 @@ export default function ClientesParticularesPage() {
               <div className="text-[11px] text-slate-500 font-medium italic">
                 {horaIngreso} a {horaSalida} · {Math.round(horasCalculadas * 60)} minutos ({horasCalculadas} h) × ${modalidad === 'Por hora' ? '3.000 /h ($50/min)' : 'Tarifa fija'} = ${valorCalculado.toLocaleString('es-CL')}
               </div>
-
               {/* SECCIÓN VOUCHER COMO ARCHIVO */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Comprobante de pago / Voucher (Archivo)</label>
@@ -902,7 +895,6 @@ export default function ClientesParticularesPage() {
                   </p>
                 )}
               </div>
-
               {/* SECCIÓN QR SOHO Y BASES DE USO FÍSICO */}
               <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-4 space-y-3">
                 <div className="flex justify-between items-center">
@@ -925,7 +917,6 @@ export default function ClientesParticularesPage() {
                   </div>
                 )}
               </div>
-
               <div className="pt-2 flex justify-end gap-2">
                 <button type="button" onClick={() => { setIsArriendoModalOpen(false); resetFormularioArriendo(); }} className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700 hover:bg-slate-50 transition">
                   Cancelar
