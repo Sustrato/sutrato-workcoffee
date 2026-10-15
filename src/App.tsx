@@ -18,6 +18,13 @@ import ContratosFisicasPage from './pages/ContratosFisicasPage'
 import PlantillaContratoFisicas from './pages/PlantillaContratoFisicas'
 import HistorialSiiOfFisicasPage from './pages/HistorialSiiOfFisicas'
 import ReportesPage from './pages/ReportesPage'
+// Páginas del Módulo de Coffee & Catering
+import CateringClientesPage from './pages/CateringClientesPage'
+import CateringPedidosPage from './pages/CateringPedidosPage'
+import CateringPagosPage from './pages/CateringPagosPage'
+import CateringCalculadoraPage from './pages/CateringCalculadoraPage'
+import CateringCalendarioPage from './pages/CateringCalendarioPage'
+
 // Lazy loading para páginas secundarias de Oficinas Virtuales
 const Contratos = lazy(() => import('./pages/Contratos'))
 const ContratoEditor = lazy(() => import('./pages/ContratoEditor'))
@@ -86,22 +93,40 @@ function App() {
             
             {userRole === 'OfFisica' ? (
               <>
-                {/* Redirección estricta obligatoria para el rol OfFisica a su único módulo permitido */}
-                <Route path="/dashboard" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
-                <Route path="/no-vigentes" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
-                <Route path="/documentos" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
-                <Route path="/documentos/:id" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
-                <Route path="/contratos" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
-                <Route path="/contratos/:id" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
-                <Route path="/historial-sii" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
-                <Route path="/reportes" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
-                <Route path="/configuracion/plantilla-contrato" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
-                <Route path="/catering/dashboard" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
-                <Route path="/catering/pedidos" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
+                {/* Restricción estricta para el rol OfFisica: Redirige todo lo prohibido a Clientes Particulares */}
+                <Route path="/dashboard" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/no-vigentes" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/documentos" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/documentos/:id" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/contratos" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/contratos/:id" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/historial-sii" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/reportes" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/configuracion/plantilla-contrato" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                
+                <Route path="/oficinas-fisicas/dashboard" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/oficinas-fisicas/resumen" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/oficinas-fisicas/administracion" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/oficinas-fisicas/contratos" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/oficinas-fisicas/plantilla-contrato" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/oficinas-fisicas/historial-sii" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/oficinas-fisicas/reportes" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                
+                <Route path="/catering/dashboard" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/catering/clientes" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/catering/pedidos" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/catering/calculadora" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/catering/calendario" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/catering/pagos" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+                <Route path="/catering/reportes" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+
+                {/* ÚNICAS DOS VISTAS PERMITIDAS PARA OFISICA */}
+                <Route path="/oficinas-fisicas/particulares" element={<ClientesParticularesPage />} />
+                <Route path="/oficinas-fisicas/calendario" element={<CalendarioOficinasPage />} />
               </>
             ) : (
               <>
-                {/* 🏢 1. OFICINAS VIRTUALES Y GESTOR ADMINISTRATIVO (Solo para Admin u otros roles) */}
+                {/* 🏢 1. OFICINAS VIRTUALES Y GESTOR ADMINISTRATIVO (Solo Admin u otros roles) */}
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/no-vigentes" element={<NoVigentes />} />
                 <Route path="/documentos" element={<Empresas />} />
@@ -131,32 +156,38 @@ function App() {
                     <PlantillaContrato />
                   </Suspense>
                 } />
+
                 {/* ☕ 3. COFFEE & CATERING */}
                 <Route path="/catering/dashboard" element={
                   <div className="p-8">
-                    <h1 className="text-2xl font-extrabold text-slate-900">Panel de Coffee & Catering</h1>
-                    <p className="mt-1 text-slate-500">Gestión y control de servicios de banquetería, coffee breaks y eventos corporativos.</p>
+                    <h1 className="text-2xl font-extrabold text-slate-900">Resumen de catering y eventos</h1>
+                    <p className="mt-1 text-slate-500">Vista comercial y operativa de banquetería y eventos corporativos.</p>
                   </div>
                 } />
-                <Route path="/catering/pedidos" element={
+                <Route path="/catering/clientes" element={<CateringClientesPage />} />
+                <Route path="/catering/pedidos" element={<CateringPedidosPage />} />
+                <Route path="/catering/calculadora" element={<CateringCalculadoraPage />} />
+                <Route path="/catering/calendario" element={<CateringCalendarioPage />} />
+                <Route path="/catering/pagos" element={<CateringPagosPage />} />
+                <Route path="/catering/reportes" element={
                   <div className="p-8">
-                    <h1 className="text-2xl font-extrabold text-slate-900">Eventos y Pedidos</h1>
-                    <p className="mt-1 text-slate-500">Listado de entregas y requerimientos programados.</p>
+                    <h1 className="text-2xl font-extrabold text-slate-900">Reportes de catering</h1>
+                    <p className="mt-1 text-slate-500">Estadísticas de ventas, personas atendidas y arriendos.</p>
                   </div>
                 } />
+
+                {/* 🏢 2. OFICINAS FÍSICAS Y PRESENCIALES (Admin tiene acceso total) */}
+                <Route path="/oficinas-fisicas/dashboard" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
+                <Route path="/oficinas-fisicas/resumen" element={<OficinasFisicas />} />
+                <Route path="/oficinas-fisicas/administracion" element={<AdministracionComercialPage />} />
+                <Route path="/oficinas-fisicas/particulares" element={<ClientesParticularesPage />} />
+                <Route path="/oficinas-fisicas/calendario" element={<CalendarioOficinasPage />} />
+                <Route path="/oficinas-fisicas/contratos" element={<ContratosFisicasPage />} />
+                <Route path="/oficinas-fisicas/plantilla-contrato" element={<PlantillaContratoFisicas />} />
+                <Route path="/oficinas-fisicas/historial-sii" element={<HistorialSiiOfFisicasPage />} />
+                <Route path="/oficinas-fisicas/reportes" element={<ReportesPage />} />
               </>
             )}
-
-            {/* 🏢 2. OFICINAS FÍSICAS Y PRESENCIALES (Accesible para OfFisica y Admin) */}
-            <Route path="/oficinas-fisicas/dashboard" element={<Navigate to="/oficinas-fisicas/resumen" replace />} />
-            <Route path="/oficinas-fisicas/resumen" element={<OficinasFisicas />} />
-            <Route path="/oficinas-fisicas/administracion" element={<AdministracionComercialPage />} />
-            <Route path="/oficinas-fisicas/particulares" element={<ClientesParticularesPage />} />
-            <Route path="/oficinas-fisicas/calendario" element={<CalendarioOficinasPage />} />
-            <Route path="/oficinas-fisicas/contratos" element={<ContratosFisicasPage />} />
-            <Route path="/oficinas-fisicas/plantilla-contrato" element={<PlantillaContratoFisicas />} />
-            <Route path="/oficinas-fisicas/historial-sii" element={<HistorialSiiOfFisicasPage />} />
-            <Route path="/oficinas-fisicas/reportes" element={<ReportesPage />} />
 
           </Route>
         </Route>

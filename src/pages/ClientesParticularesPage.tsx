@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { Plus, X, Search, Calendar, Trash2, Edit2, Upload } from 'lucide-react'
+import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 
 interface ClienteParticular {
   id: string
@@ -8,8 +10,13 @@ interface ClienteParticular {
   rut: string
   telefono: string
   correo?: string
-  direccion?: string
+  empresa?: string
+  rut_empresa?: string
   observaciones?: string
+  terminos_aceptados?: boolean
+  fecha_aceptacion?: string
+  zoho_enviado?: boolean
+  zoho_payload?: any
   created_at?: string
 }
 
@@ -25,9 +32,18 @@ interface UsoOficina {
   monto_total: number
   estado_pago: string
   voucher_url?: string
+  bases_aceptadas?: boolean
+  fecha_aceptacion_bases?: string
+}
+
+// Función que elimina puntos, guiones y espacios de cualquier RUT
+const normalizarRut = (valor: string) => {
+  if (!valor) return ''
+  return valor.toLowerCase().replace(/[\.\-\s]/g, '')
 }
 
 export default function ClientesParticularesPage() {
+  const navigate = useNavigate()
   const [clientes, setClientes] = useState<ClienteParticular[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
@@ -35,6 +51,10 @@ export default function ClientesParticularesPage() {
   // Control de modales
   const [isClienteModalOpen, setIsClienteModalOpen] = useState(false)
   const [isArriendoModalOpen, setIsArriendoModalOpen] = useState(false)
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false)
+  
+  // Cliente seleccionado para ver el QR
+  const [clienteQrSeleccionado, setClienteQrSeleccionado] = useState<any>(null)
   
   // Estado para Edición de Cliente y Edición de Visita/Arriendo
   const [editingClienteId, setEditingClienteId] = useState<string | null>(null)
@@ -49,7 +69,8 @@ export default function ClientesParticularesPage() {
   const [rut, setRut] = useState('')
   const [telefono, setTelefono] = useState('')
   const [correo, setCorreo] = useState('')
-  const [direccion, setDireccion] = useState('')
+  const [empresa, setEmpresa] = useState('')
+  const [rutEmpresa, setRutEmpresa] = useState('')
   const [obsCliente, setObsCliente] = useState('')
   
   // Campos del Modal "Registrar / Editar arriendo"
@@ -103,12 +124,20 @@ export default function ClientesParticularesPage() {
 
   const fetchClientes = async () => {
     setLoading(true)
-    const { data } = await supabase.from('clientes_particulares').select('*').order('created_at', { ascending: false })
+    const { data, error } = await supabase
+      .from('clientes_particulares')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(1000)
+
     if (data) {
       setClientes(data)
       if (data.length > 0 && !clienteSeleccionadoId) {
         setClienteSeleccionadoId(data[0].id)
       }
+    }
+    if (error) {
+      console.error('Error al cargar clientes:', error.message)
     }
     setLoading(false)
   }
@@ -148,7 +177,8 @@ export default function ClientesParticularesPage() {
     setRut('')
     setTelefono('')
     setCorreo('')
-    setDireccion('')
+    setEmpresa('')
+    setRutEmpresa('')
     setObsCliente('')
   }
 
@@ -164,12 +194,24 @@ export default function ClientesParticularesPage() {
     setRut(c.rut || '')
     setTelefono(c.telefono || '')
     setCorreo(c.correo || '')
-    setDireccion(c.direccion || '')
+    setEmpresa(c.empresa || '')
+    setRutEmpresa(c.rut_empresa || '')
     setObsCliente(c.observaciones || '')
     setIsClienteModalOpen(true)
   }
 
-  // Cargar datos de una visita existente para poder editarla
+  const handleAbrirQr = (c: ClienteParticular) => {
+    setClienteQrSeleccionado(c)
+    setIsQrModalOpen(true)
+  }
+
+  const handleVerZohoPayload = (c: ClienteParticular) => {
+    const jsonString = JSON.stringify({ cliente: c, respaldoZoho: c.zoho_payload }, null, 2)
+    const blob = new Blob([jsonString], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+  }
+
   const handleSeleccionarVisitaParaEditar = (visita: UsoOficina) => {
     setEditingVisitaId(visita.id)
     setOficina(visita.oficina_asignada || 'Oficina 1')
@@ -179,7 +221,7 @@ export default function ClientesParticularesPage() {
     setHoraSalida(visita.hora_fin || '10:00')
     setModalidad(visita.modalidad || 'Por hora')
     setEstadoPago(visita.estado_pago || 'Pagado')
-    setBasesAceptadas(true)
+    setBasesAceptadas(visita.bases_aceptadas ?? true)
   }
 
   const verificarDisponibilidad = async () => {
@@ -201,7 +243,6 @@ export default function ClientesParticularesPage() {
     }
     if (reservasCruzadas) {
       reservasCruzadas.forEach(r => {
-        // Si estamos editando la misma visita, no debe bloquearse a sí misma
         if (editingVisitaId && r.id === editingVisitaId) return
         if (r.hora_inicio && r.hora_fin) {
           const hayTraslape = horaIngreso < r.hora_fin && horaSalida > r.hora_inicio
@@ -253,15 +294,20 @@ export default function ClientesParticularesPage() {
   const handleGuardarCliente = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!nombreCompleto || !rut || !telefono) return alert('Completa los campos obligatorios (*)')
+    
     const payload = {
       nombre_completo: nombreCompleto,
-      rut,
+      rut: normalizarRut(rut),
       telefono,
       correo,
-      direccion,
-      observaciones: obsCliente
+      empresa,
+      rut_empresa: normalizarRut(rutEmpresa),
+      observaciones: obsCliente,
+      terminos_aceptados: false,
+      zoho_enviado: false
     }
-    let error;
+    
+    let error
     if (editingClienteId) {
       const res = await supabase.from('clientes_particulares').update(payload).eq('id', editingClienteId)
       error = res.error
@@ -304,31 +350,24 @@ export default function ClientesParticularesPage() {
     if (oficinasBloqueadas.includes(oficina)) {
       return alert(`La ${oficina} no está disponible en este horario (${detallesBloqueo[oficina]}).`)
     }
-
     setUploadingVoucher(true)
     let finalVoucherUrl = ''
-
     if (voucherFile) {
       const fileExt = voucherFile.name.split('.').pop()
       const fileName = `voucher_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
       const filePath = `${fileName}`
-
       const { error: uploadError } = await supabase.storage
         .from('vouchers')
         .upload(filePath, voucherFile)
-
       if (uploadError) {
         setUploadingVoucher(false)
         return alert('Error al subir el archivo de voucher: ' + uploadError.message)
       }
-
       const { data: publicURLData } = supabase.storage
         .from('vouchers')
         .getPublicUrl(filePath)
-
       finalVoucherUrl = publicURLData.publicUrl
     }
-
     const payloadArriendo: any = {
       cliente_id: clienteSeleccionadoId,
       oficina_asignada: oficina,
@@ -343,12 +382,10 @@ export default function ClientesParticularesPage() {
       bases_aceptadas: basesAceptadas,
       fecha_aceptacion_bases: fechaAceptacion
     }
-
     if (finalVoucherUrl) {
       payloadArriendo.voucher_url = finalVoucherUrl
     }
-
-    let error;
+    let error
     if (editingVisitaId) {
       const res = await supabase.from('uso_oficinas_particulares').update(payloadArriendo).eq('id', editingVisitaId)
       error = res.error
@@ -356,9 +393,7 @@ export default function ClientesParticularesPage() {
       const res = await supabase.from('uso_oficinas_particulares').insert([payloadArriendo])
       error = res.error
     }
-
     setUploadingVoucher(false)
-
     if (error) {
       alert('Error guardando el arriendo: ' + error.message)
     } else {
@@ -369,10 +404,20 @@ export default function ClientesParticularesPage() {
     }
   }
 
-  const clientesFiltered = clientes.filter(c =>
-    c.nombre_completo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.rut.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+  // Filtrado blindado que limpia ambos lados (búsqueda y base de datos)
+  const queryLimpio = normalizarRut(searchTerm)
+  const clientesFiltered = clientes.filter(c => {
+    const nombreMatch = c.nombre_completo?.toLowerCase().includes(searchTerm.toLowerCase()) || false
+    const empresaMatch = c.empresa?.toLowerCase().includes(searchTerm.toLowerCase()) || false
+    const correoMatch = c.correo?.toLowerCase().includes(searchTerm.toLowerCase()) || false
+    
+    const rutClienteLimpio = normalizarRut(c.rut || '')
+    const rutEmpresaLimpio = normalizarRut(c.rut_empresa || '')
+    
+    const rutMatch = queryLimpio ? (rutClienteLimpio.includes(queryLimpio) || rutEmpresaLimpio.includes(queryLimpio)) : false
+    
+    return nombreMatch || empresaMatch || correoMatch || rutMatch
+  })
 
   const totalHorasAcumuladas = historialVisitasCliente.reduce((acc, curr) => acc + (Number(curr.horas_calculadas) || 0), 0)
 
@@ -437,7 +482,7 @@ export default function ClientesParticularesPage() {
           <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
           <input 
             type="text" 
-            placeholder="Buscar por nombre, RUT, teléfono o correo"
+            placeholder="Buscar por nombre, RUT (con/sin guion/puntos), empresa o correo"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#C5A059]"
@@ -450,37 +495,76 @@ export default function ClientesParticularesPage() {
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="bg-[#181818] text-[#C5A059] font-bold uppercase tracking-wider">
-              <th className="py-3 px-4">Nombre / RUT</th>
-              <th className="py-3 px-4">Contacto</th>
-              <th className="py-3 px-4">Dirección</th>
-              <th className="py-3 px-4 text-center">Acciones</th>
+              <th className="py-3.5 px-4">NOMBRE / RUT</th>
+              <th className="py-3.5 px-4">EMPRESA (OPCIONAL)</th>
+              <th className="py-3.5 px-4">CONTACTO</th>
+              <th className="py-3.5 px-4">TÉRMINOS / ZOHO</th>
+              <th className="py-3.5 px-4 text-right">ACCIONES</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
-              <tr><td colSpan={4} className="text-center py-6 text-slate-400">Cargando clientes...</td></tr>
+              <tr><td colSpan={5} className="text-center py-8 text-slate-400">Cargando clientes...</td></tr>
             ) : clientesFiltered.length === 0 ? (
-              <tr><td colSpan={4} className="text-center py-6 text-slate-400">No hay clientes particulares registrados.</td></tr>
+              <tr><td colSpan={5} className="text-center py-8 text-slate-400">No hay clientes particulares registrados.</td></tr>
             ) : (
               clientesFiltered.map(c => (
                 <tr key={c.id} className="hover:bg-slate-50 transition">
-                  <td className="py-3 px-4 font-bold text-slate-900">
+                  <td className="py-4 px-4 font-bold text-slate-900">
                     {c.nombre_completo}
                     <span className="block text-[11px] font-normal text-slate-500">{c.rut}</span>
                   </td>
-                  <td className="py-3 px-4 text-slate-700">
-                    {c.telefono}
-                    <span className="block text-[11px] text-slate-400">{c.correo || 'Sin correo'}</span>
+                  <td className="py-4 px-4 text-slate-700">
+                    {c.empresa ? (
+                      <>
+                        <span className="font-semibold">{c.empresa}</span>
+                        {c.rut_empresa && <span className="block text-[11px] text-slate-400">{c.rut_empresa}</span>}
+                      </>
+                    ) : (
+                      <span className="text-slate-400 italic">Sin empresa</span>
+                    )}
                   </td>
-                  <td className="py-3 px-4 text-slate-600">{c.direccion || 'Sin dirección'}</td>
-                  <td className="py-3 px-4 text-center space-x-2">
+                  <td className="py-4 px-4 text-slate-600">
+                    {c.telefono}
+                    <span className="block text-[11px] text-slate-400">{c.correo || '—'}</span>
+                  </td>
+                  <td className="py-4 px-4">
+                    <div className="flex flex-col gap-1 items-start">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        c.terminos_aceptados 
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                          : 'bg-amber-100 text-amber-800 border border-amber-200'
+                      }`}>
+                        {c.terminos_aceptados ? '• Aceptado' : '• Pendiente'}
+                      </span>
+                      
+                      <button
+                        type="button"
+                        onClick={() => handleAbrirQr(c)}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#C5A059] hover:underline transition"
+                      >
+                        <QrCode size={12} /> Ver QR
+                      </button>
+
+                      {c.terminos_aceptados && (
+                        <button
+                          type="button"
+                          onClick={() => handleVerZohoPayload(c)}
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-600 hover:text-purple-800 transition"
+                        >
+                          <Download size={11} /> Ver respaldo Zoho
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                  <td className="py-4 px-4 text-right space-x-1.5">
                     <button 
                       onClick={() => {
                         resetFormularioArriendo()
                         setClienteSeleccionadoId(c.id)
                         setIsArriendoModalOpen(true)
                       }}
-                      className="px-2.5 py-1.5 border border-[#C5A059] text-slate-900 bg-amber-50 rounded text-[11px] font-bold hover:bg-amber-100 transition"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-[#C5A059] text-slate-900 bg-amber-50 rounded-lg text-[11px] font-bold hover:bg-amber-100 transition"
                     >
                       + Uso de oficina
                     </button>
@@ -489,7 +573,7 @@ export default function ClientesParticularesPage() {
                       className="p-1.5 text-slate-600 hover:text-slate-900 border border-slate-200 rounded-lg hover:bg-slate-100 align-middle transition"
                       title="Editar cliente"
                     >
-                      <Edit2 size={15} />
+                      <Edit2 size={14} />
                     </button>
                     <button 
                       onClick={() => {
@@ -499,7 +583,7 @@ export default function ClientesParticularesPage() {
                       className="p-1.5 text-rose-500 hover:text-rose-700 border border-rose-200 hover:bg-rose-50 rounded-lg align-middle transition"
                       title="Eliminar cliente"
                     >
-                      <Trash2 size={15} />
+                      <Trash2 size={14} />
                     </button>
                   </td>
                 </tr>
@@ -508,6 +592,43 @@ export default function ClientesParticularesPage() {
           </tbody>
         </table>
       </section>
+
+      {/* 📱 MODAL DE CÓDIGO QR SOHO (SIN BOTÓN VERDE) */}
+      {isQrModalOpen && clienteQrSeleccionado && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl p-6 text-center space-y-4">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="font-black text-slate-900 text-base">QR de Aceptación de Términos</h3>
+              <button onClick={() => setIsQrModalOpen(false)} className="text-slate-400 hover:text-slate-700">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <p className="text-xs text-slate-500">
+              Escanea el código para precargar los datos de <strong>{clienteQrSeleccionado.nombre_completo}</strong> en el formulario de Zoho.
+            </p>
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-center">
+              <QRCodeSVG 
+                value={`https://forms.zohopublic.com/rotaryconcordia1/form/Aceptacionterminossutrato/formperma/dEiuFyNghAj8CFZhy7d5P7knBvun9DFBkH6HX0l2Bh4?zf_lang=en&Field_3=${encodeURIComponent(clienteQrSeleccionado.rut || '')}&Field_4=${encodeURIComponent(clienteQrSeleccionado.telefono || '')}&Field_5=${encodeURIComponent(clienteQrSeleccionado.correo || '')}&Field_6=${encodeURIComponent(clienteQrSeleccionado.nombre_completo || '')}&Field_7=${encodeURIComponent(clienteQrSeleccionado.rut_empresa || '')}`} 
+                size={180} 
+              />
+            </div>
+            <div className="text-left bg-blue-50/60 p-3 rounded-lg text-[11px] text-slate-700 space-y-1">
+              <p><strong>Cliente:</strong> {clienteQrSeleccionado.nombre_completo} ({clienteQrSeleccionado.rut})</p>
+              <p><strong>Estado actual:</strong> <span className={clienteQrSeleccionado?.terminos_aceptados ? 'text-emerald-700 font-bold' : 'text-amber-700 font-bold'}>{clienteQrSeleccionado?.terminos_aceptados ? 'Aceptado' : 'Pendiente de lectura y envío'}</span></p>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button 
+                onClick={() => setIsQrModalOpen(false)}
+                className="w-full bg-[#181818] text-[#C5A059] font-bold py-2 rounded-lg text-xs hover:bg-black transition"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 🖤 MODAL 1: NUEVO / EDITAR CLIENTE PARTICULAR */}
       {isClienteModalOpen && (
@@ -539,10 +660,14 @@ export default function ClientesParticularesPage() {
                   <label className="block font-bold text-slate-700 mb-1">Correo</label>
                   <input type="email" value={correo} onChange={(e) => setCorreo(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
                 </div>
-              </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Dirección</label>
-                <input type="text" value={direccion} onChange={(e) => setDireccion(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Empresa (Opcional)</label>
+                  <input type="text" placeholder="Nombre de la empresa" value={empresa} onChange={(e) => setEmpresa(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">RUT empresa (Opcional)</label>
+                  <input type="text" placeholder="XX.XXX.XXX-X" value={rutEmpresa} onChange={(e) => setRutEmpresa(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
+                </div>
               </div>
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Observaciones</label>
@@ -616,7 +741,7 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* 🖤 MODAL 2: REGISTRAR / EDITAR ARRIENDO CON HISTORIAL */}
+      {/* 🖤 MODAL 2: REGISTRAR / EDITAR ARRIENDO CON HISTORIAL Y QR SOHO */}
       {isArriendoModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -642,7 +767,7 @@ export default function ClientesParticularesPage() {
                     required
                   >
                     {clientes.map(c => (
-                      <option key={c.id} value={c.id}>{c.nombre_completo} (RUT: {c.rut})</option>
+                      <option key={c.id} value={c.id}>{c.nombre_completo} {c.empresa ? `(${c.empresa})` : ''} - RUT: {c.rut}</option>
                     ))}
                   </select>
                 </div>
@@ -657,7 +782,6 @@ export default function ClientesParticularesPage() {
                     <strong className="text-[#C5A059]">{totalHorasAcumuladas.toFixed(1)} hrs</strong>
                   </div>
                 </div>
-
                 {historialVisitasCliente.length > 0 && (
                   <div className="space-y-1">
                     <p className="font-bold text-slate-600 text-[10px] uppercase tracking-wider">
@@ -779,10 +903,16 @@ export default function ClientesParticularesPage() {
                 )}
               </div>
 
-              <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-4 space-y-2">
-                <h4 className="font-bold text-slate-900">Bases y Condiciones de uso físico</h4>
+              {/* SECCIÓN QR SOHO Y BASES DE USO FÍSICO */}
+              <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <h4 className="font-bold text-slate-900 flex items-center gap-2">
+                    <QrCode size={18} className="text-[#C5A059]" /> Bases y Condiciones de Uso Físico (SOHO QR)
+                  </h4>
+                  <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded font-bold">Escaneo QR</span>
+                </div>
                 <p className="text-slate-600 text-[11px]">
-                  <strong>Documento general cargado por Sutrato:</strong> El cliente debe leerlo y aceptar sus condiciones antes de guardar el arriendo.
+                  El cliente puede escanear el código QR vinculado de Soho para visualizar las bases y condiciones vigentes del espacio de trabajo.
                 </p>
                 <div className="flex items-center gap-2 pt-1">
                   <input type="checkbox" id="bases" checked={basesAceptadas} onChange={(e) => setBasesAceptadas(e.target.checked)} className="rounded text-[#C5A059] focus:ring-[#C5A059]" />

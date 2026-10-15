@@ -11,8 +11,8 @@ import {
   Settings2,
   Building2,
   Store,
-  Coffee,
   Users,
+  Calculator,
   Calendar as CalendarIcon
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -41,9 +41,20 @@ const navigationOficinasFisicas = [
   { label: 'Reportes', to: '/oficinas-fisicas/reportes', icon: BarChart3 },
 ]
 
+// Menú exclusivo de solo dos opciones para cuando es estrictamente OfFisica limitado
+const navigationOficinasFisicasLimitada = [
+  { label: 'Clientes particulares', to: '/oficinas-fisicas/particulares', icon: Users, end: true },
+  { label: 'Calendario de oficinas', to: '/oficinas-fisicas/calendario', icon: CalendarIcon },
+]
+
 const navigationCatering = [
-  { label: 'Panel Catering', to: '/catering/dashboard', icon: Coffee, end: true },
-  { label: 'Eventos y Pedidos', to: '/catering/pedidos', icon: FileText },
+  { label: 'Resumen general', to: '/catering/dashboard', icon: LayoutDashboard, end: true },
+  { label: 'Clientes', to: '/catering/clientes', icon: Users },
+  { label: 'Eventos y cotizaciones', to: '/catering/pedidos', icon: FileText },
+  { label: 'Calculadora de rentabilidad', to: '/catering/calculadora', icon: Calculator },
+  { label: 'Calendario', to: '/catering/calendario', icon: CalendarIcon },
+  { label: 'Pagos y cobranzas', to: '/catering/pagos', icon: CreditCard },
+  { label: 'Reportes', to: '/catering/reportes', icon: BarChart3 },
 ]
 
 export default function MainLayout() {
@@ -57,7 +68,6 @@ export default function MainLayout() {
   
   const [userEmail, setUserEmail] = useState<string>('')
   const [isOfFisicaOnly, setIsOfFisicaOnly] = useState<boolean>(false)
-
   const alertCount = notificationFeed.alerts.length
 
   // Obtener datos del usuario y rol activo
@@ -67,7 +77,6 @@ export default function MainLayout() {
       if (session?.user) {
         const email = session.user.email ?? ''
         setUserEmail(email)
-
         const { data: roleData } = await supabase
           .from('user_roles')
           .select('role')
@@ -75,12 +84,12 @@ export default function MainLayout() {
         
         const hasOfFisica = roleData?.some((r) => r.role === 'OfFisica')
         const isGenericOffice = email.toLowerCase() === 'oficinassutrato@zohomail.com'
-
         if (hasOfFisica || isGenericOffice) {
           setIsOfFisicaOnly(true)
-          // Si entra a una ruta general, redirigirlo directo al resumen de oficinas físicas
-          if (location.pathname === '/' || location.pathname === '/dashboard' || location.pathname === '/documentos') {
-            navigate('/oficinas-fisicas/resumen', { replace: true })
+          // Si entra a una ruta general o no permitida, redirigirlo directo a Clientes Particulares
+          const rutasPermitidas = ['/oficinas-fisicas/particulares', '/oficinas-fisicas/calendario']
+          if (!rutasPermitidas.includes(location.pathname)) {
+            navigate('/oficinas-fisicas/particulares', { replace: true })
           }
         }
       }
@@ -143,7 +152,7 @@ export default function MainLayout() {
 
   function openNotification() {
     setIsNotificationsOpen(false)
-    navigate(isOfFisicaOnly ? '/oficinas-fisicas/resumen' : '/documentos')
+    navigate(isOfFisicaOnly ? '/oficinas-fisicas/particulares' : '/documentos')
   }
 
   const handleModuleSwitch = (module: 'oficinas' | 'fisicas' | 'catering') => {
@@ -157,9 +166,9 @@ export default function MainLayout() {
     }
   }
 
-  // RESTRICCIÓN ABSOLUTA: Si es OfFisica, se fuerza exclusivamente su menú lateral
+  // RESTRICCIÓN ABSOLUTA: Si es OfFisica, se muestra exclusivamente el menú limitado de 2 opciones
   const activeNavigation = isOfFisicaOnly
-    ? navigationOficinasFisicas
+    ? navigationOficinasFisicasLimitada
     : currentModule === 'oficinas' 
       ? navigationOficinas 
       : currentModule === 'fisicas' 
@@ -212,7 +221,7 @@ export default function MainLayout() {
                 <>
                   <Icon
                     size={18}
-                    className={isActive ? 'text-primary-600' : 'text-slate-400 group-hover:text-slate-600'}
+                    className={isActive ? (currentModule === 'catering' ? 'text-orange-600' : 'text-primary-600') : 'text-slate-400 group-hover:text-slate-600'}
                   />
                   {label}
                 </>
@@ -263,7 +272,6 @@ export default function MainLayout() {
                 </button>
               </div>
             )}
-
             <div ref={notificationsRef} className="relative">
               <button
                 type="button"

@@ -4,6 +4,15 @@ import { supabase } from '../services/supabase'
 import { Plus, X, Trash2, CreditCard, ExternalLink, Search, FileText, Edit2, Download, QrCode } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
+// Nombre del bucket exacto
+const BUCKET_NAME = 'documentos_oficinas'
+
+// Función para eliminar puntos, guiones y espacios de cualquier RUT
+const normalizarRut = (valor: string) => {
+  if (!valor) return ''
+  return valor.toLowerCase().replace(/[\.\-\s]/g, '')
+}
+
 export default function AdministracionComercialPage() {
   const navigate = useNavigate()
   const [arriendos, setArriendos] = useState<any[]>([])
@@ -16,14 +25,16 @@ export default function AdministracionComercialPage() {
   const [isQrModalOpen, setIsQrModalOpen] = useState(false)
   const [empresaQrSeleccionada, setEmpresaQrSeleccionada] = useState<any>(null)
   
-  // Estado para saber si estamos Creando o Editando
+  // Estado para saber si estamos Creando o Editando Empresa
   const [editingId, setEditingId] = useState<string | null>(null)
   
-  // Empresa seleccionada para el modal de pagos
+  // Empresa seleccionada para el modal de pagos y estado de Edición de Pago
   const [empresaSeleccionada, setEmpresaSeleccionada] = useState<any>(null)
   const [historialPagos, setHistorialPagos] = useState<any[]>([])
   const [loadingPagos, setLoadingPagos] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [editingPagoId, setEditingPagoId] = useState<string | null>(null)
+
   // Formulario "Nueva empresa / Editar empresa"
   const [empresa, setEmpresa] = useState('')
   const [rutEmpresa, setRutEmpresa] = useState('')
@@ -37,7 +48,8 @@ export default function AdministracionComercialPage() {
   const [frecuencia, setFrecuencia] = useState('MENSUAL')
   const [montoMensual, setMontoMensual] = useState('350000')
   const [vigencia, setVigencia] = useState('VIGENTE')
-  // Formulario "Registrar pago"
+
+  // Formulario "Registrar / Editar pago"
   const [fechaPago, setFechaPago] = useState(new Date().toISOString().split('T')[0])
   const [formaPago, setFormaPago] = useState('Transferencia')
   const [montoBruto, setMontoBruto] = useState(350000)
@@ -54,9 +66,11 @@ export default function AdministracionComercialPage() {
   const oficinasOcupadas = arriendos
     .filter(a => a.estado === 'Activo' && a.id !== editingId)
     .map(a => a.tipo_espacio)
+
   // Cálculos de IVA y Neto
   const netoCalculado = Math.round(montoBruto / 1.19)
   const ivaCalculado = montoBruto - netoCalculado
+
   const fetchArriendos = async () => {
     setLoading(true)
     const { data } = await supabase
@@ -66,9 +80,11 @@ export default function AdministracionComercialPage() {
     if (data) setArriendos(data)
     setLoading(false)
   }
+
   useEffect(() => {
     fetchArriendos()
   }, [])
+
   // Limpiar formulario de empresa
   const resetFormularioEmpresa = () => {
     setEditingId(null)
@@ -86,7 +102,8 @@ export default function AdministracionComercialPage() {
     const primeraDisponible = listaOficinas.find(of => !oficinasOcupadas.includes(of))
     if (primeraDisponible) setTipoEspacio(primeraDisponible)
   }
-  // Cargar datos para EDITAR
+
+  // Cargar datos para EDITAR Empresa
   const handleAbrirEditar = (a: any) => {
     setEditingId(a.id)
     setEmpresa(a.nombre_cliente || '')
@@ -104,7 +121,27 @@ export default function AdministracionComercialPage() {
     setIsModalOpen(true)
   }
 
-  // 📄 Ver el Payload de Zoho como si fuera un archivo descargable o vista previa
+  // Cargar datos para EDITAR un Pago del historial
+  const handleSeleccionarPagoParaEditar = (pago: any) => {
+    setEditingPagoId(pago.id)
+    setFechaPago(pago.fecha_pago || new Date().toISOString().split('T')[0])
+    setFormaPago(pago.forma_pago || 'Transferencia')
+    setMontoBruto(pago.monto_bruto || 350000)
+    setMontoLiquido(pago.monto_liquido || 350000)
+    setProximoPago(pago.proximo_pago || '')
+    setComprobanteFile(null)
+  }
+
+  const resetFormularioPago = () => {
+    setEditingPagoId(null)
+    setComprobanteFile(null)
+    if (empresaSeleccionada) {
+      setMontoBruto(empresaSeleccionada.monto_mensual || 350000)
+      setMontoLiquido(empresaSeleccionada.monto_mensual || 350000)
+    }
+  }
+
+  // 📄 Ver el Payload de Zoho
   const handleVerZohoPayload = (empresaItem: any) => {
     if (!empresaItem.zoho_payload) {
       alert("Este cliente aún no ha enviado el formulario de Zoho.")
@@ -124,7 +161,7 @@ export default function AdministracionComercialPage() {
 
   // Auto-calcular fecha del próximo pago según frecuencia
   useEffect(() => {
-    if (fechaPago) {
+    if (fechaPago && !editingPagoId) {
       const d = new Date(fechaPago)
       if (frecuencia === 'ANUAL') {
         d.setFullYear(d.getFullYear() + 1)
@@ -133,7 +170,8 @@ export default function AdministracionComercialPage() {
       }
       setProximoPago(d.toISOString().split('T')[0])
     }
-  }, [fechaPago, frecuencia])
+  }, [fechaPago, frecuencia, editingPagoId])
+
   // Cargar el historial de pagos de la empresa seleccionada
   const fetchHistorialPagos = async (empresaId: string) => {
     setLoadingPagos(true)
@@ -145,36 +183,21 @@ export default function AdministracionComercialPage() {
     if (data) setHistorialPagos(data)
     setLoadingPagos(false)
   }
+
   const handleAbrirPagos = (empresaItem: any) => {
     setEmpresaSeleccionada(empresaItem)
     setMontoBruto(empresaItem.monto_mensual || 350000)
     setMontoLiquido(empresaItem.monto_mensual || 350000)
     setFrecuencia(empresaItem.frecuencia || 'MENSUAL')
-    setComprobanteFile(null)
+    resetFormularioPago()
     setIsPagosModalOpen(true)
     fetchHistorialPagos(empresaItem.id)
   }
+
   // 📄 Abrir o Generar Contrato seguro
   const handleAbrirContrato = async (empresaItem: any) => {
     if (empresaItem.contrato_url) {
-      try {
-        let filePath = ''
-        if (empresaItem.contrato_url.includes('/documentos_oficinas/')) {
-          filePath = empresaItem.contrato_url.split('/documentos_oficinas/')[1]
-        } else {
-          filePath = empresaItem.contrato_url
-        }
-        filePath = decodeURIComponent(filePath)
-        const { data, error } = await supabase.storage
-          .from('documentos_oficinas')
-          .createSignedUrl(filePath, 60)
-        if (error) throw error
-        if (data?.signedUrl) {
-          window.open(data.signedUrl, '_blank')
-        }
-      } catch (err: any) {
-        alert('Error al acceder al contrato: ' + err.message)
-      }
+      window.open(empresaItem.contrato_url, '_blank')
     } else {
       const queryParams = new URLSearchParams({
         id: String(empresaItem.id || ''),
@@ -189,23 +212,35 @@ export default function AdministracionComercialPage() {
       navigate(`/oficinas-fisicas/plantilla-contrato?${queryParams}`)
     }
   }
-  // Subir archivo a Supabase Storage
-  const uploadFile = async (file: File, folder: string) => {
-    const fileExt = file.name.split('.').pop()
-    const fileName = `${folder}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`
-    
-    const { error } = await supabase.storage
-      .from('documentos_oficinas')
-      .upload(fileName, file)
-    if (error) {
-      console.error('Error subiendo archivo:', error)
+
+  // Subir archivo asegurando la ruta correcta dentro de la carpeta 'comprobantes'
+  const uploadFile = async (file: File) => {
+    try {
+      const fileExt = file.name.split('.').pop()
+      const fileName = `comprobantes/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`
+      
+      const { error } = await supabase.storage
+        .from(BUCKET_NAME)
+        .upload(fileName, file, { upsert: true })
+      
+      if (error) {
+        console.error('Error subiendo archivo:', error)
+        alert('Error al subir el comprobante: ' + error.message)
+        return null
+      }
+      
+      // Obtener URL pública de manera segura
+      const { data } = supabase.storage
+        .from(BUCKET_NAME)
+        .getPublicUrl(fileName)
+        
+      return data?.publicUrl || null
+    } catch (err: any) {
+      console.error('Excepción al subir archivo:', err)
       return null
     }
-    const { data } = supabase.storage
-      .from('documentos_oficinas')
-      .getPublicUrl(fileName)
-    return data.publicUrl
   }
+
   // 💾 Guardar (Crear o Editar Empresa)
   const handleGuardarEmpresa = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -215,9 +250,9 @@ export default function AdministracionComercialPage() {
     }
     const payload = {
       nombre_cliente: empresa,
-      rut_empresa: rutEmpresa,
+      rut_empresa: normalizarRut(rutEmpresa),
       representante_legal: representanteLegal,
-      rut_representante: rutRepresentante,
+      rut_representante: normalizarRut(rutRepresentante),
       telefono,
       correo,
       observaciones,
@@ -254,39 +289,59 @@ export default function AdministracionComercialPage() {
       alert('Error al guardar la empresa: ' + error.message)
     }
   }
-  // Registrar pago de arriendo y comprobante
+
+  // Registrar o Actualizar Pago de arriendo
   const handleGuardarPago = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!empresaSeleccionada) return
     setUploading(true)
+    
     let urlComprobante = ''
     if (comprobanteFile) {
-      const url = await uploadFile(comprobanteFile, 'comprobantes')
+      const url = await uploadFile(comprobanteFile)
       if (url) urlComprobante = url
     }
-    const { error: errPago } = await supabase.from('pagos_oficinas_fisicas').insert([
-      {
-        empresa_id: empresaSeleccionada.id,
-        fecha_pago: fechaPago,
-        forma_pago: formaPago,
-        monto_bruto: montoBruto,
-        monto_neto: netoCalculado,
-        iva: ivaCalculado,
-        monto_liquido: montoLiquido,
-        proximo_pago: proximoPago,
-        comprobante_url: urlComprobante || null
-      }
-    ])
-    await supabase.from('ventas_diarias').insert([
-      {
-        fecha: fechaPago,
-        linea_negocio: 'Arriendo Oficina Física',
-        medio_pago: formaPago,
-        monto_bruto: montoBruto,
-        documento: `PAGO-OF-${empresaSeleccionada.nombre_cliente.substring(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}`,
-        observacion: `Cobro arriendo: ${empresaSeleccionada.tipo_espacio} (${empresaSeleccionada.nombre_cliente})`
-      }
-    ])
+
+    const payloadPago: any = {
+      empresa_id: empresaSeleccionada.id,
+      fecha_pago: fechaPago,
+      forma_pago: formaPago,
+      monto_bruto: montoBruto,
+      monto_neto: netoCalculado,
+      iva: ivaCalculado,
+      monto_liquido: montoLiquido,
+      proximo_pago: proximoPago
+    }
+
+    if (urlComprobante) {
+      payloadPago.comprobante_url = urlComprobante
+    }
+
+    let errPago = null
+    if (editingPagoId) {
+      const { error } = await supabase
+        .from('pagos_oficinas_fisicas')
+        .update(payloadPago)
+        .eq('id', editingPagoId)
+      errPago = error
+    } else {
+      const { error } = await supabase
+        .from('pagos_oficinas_fisicas')
+        .insert([payloadPago])
+      errPago = error
+
+      await supabase.from('ventas_diarias').insert([
+        {
+          fecha: fechaPago,
+          linea_negocio: 'Arriendo Oficina Física',
+          medio_pago: formaPago,
+          monto_bruto: montoBruto,
+          documento: `PAGO-OF-${empresaSeleccionada.nombre_cliente.substring(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}`,
+          observacion: `Cobro arriendo: ${empresaSeleccionada.tipo_espacio} (${empresaSeleccionada.nombre_cliente})`
+        }
+      ])
+    }
+
     const { error: errEmpresa } = await supabase
       .from('oficinas_fisicas')
       .update({
@@ -294,16 +349,18 @@ export default function AdministracionComercialPage() {
         vigencia: 'VIGENTE'
       })
       .eq('id', empresaSeleccionada.id)
+
     setUploading(false)
     if (!errPago && !errEmpresa) {
-      alert('¡Pago registrado con éxito!')
-      setComprobanteFile(null)
+      alert(editingPagoId ? '¡Pago actualizado con éxito!' : '¡Pago registrado con éxito!')
+      resetFormularioPago()
       fetchHistorialPagos(empresaSeleccionada.id)
       fetchArriendos()
     } else {
       alert('Error guardando el pago: ' + (errPago?.message || errEmpresa?.message))
     }
   }
+
   const handleEliminarPago = async (pagoId: string) => {
     if (!confirm('¿Seguro que deseas eliminar este registro de pago?')) return
     const { error } = await supabase
@@ -317,6 +374,7 @@ export default function AdministracionComercialPage() {
       alert('Error al eliminar el pago: ' + error.message)
     }
   }
+
   const handleEliminar = async (empresaItem: any) => {
     const confirmacion = prompt(
       `⚠️ ATENCIÓN: Esta acción eliminará permanentemente la empresa "${empresaItem.nombre_cliente}" y sus contratos/pagos asociados.\n\nEscribe "ELIMINAR" en mayúsculas para confirmar:`
@@ -333,10 +391,17 @@ export default function AdministracionComercialPage() {
       alert('Confirmación incorrecta. No se realizaron cambios.')
     }
   }
-  const arriendosFiltrados = arriendos.filter(a =>
-    a.nombre_cliente.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (a.rut_empresa && a.rut_empresa.toLowerCase().includes(searchTerm.toLowerCase()))
-  )
+
+  // Búsqueda flexible ignorando puntos, guiones y espacios en los RUTs
+  const queryLimpio = normalizarRut(searchTerm)
+  const arriendosFiltrados = arriendos.filter(a => {
+    const nombreMatch = a.nombre_cliente?.toLowerCase().includes(searchTerm.toLowerCase()) || false
+    const rutEmpresaLimpio = normalizarRut(a.rut_empresa || '')
+    const rutRepLimpio = normalizarRut(a.rut_representante || '')
+    const rutMatch = queryLimpio ? (rutEmpresaLimpio.includes(queryLimpio) || rutRepLimpio.includes(queryLimpio)) : false
+    return nombreMatch || rutMatch
+  })
+
   return (
     <div className="mx-auto max-w-7xl space-y-7 font-sans">
       
@@ -369,6 +434,7 @@ export default function AdministracionComercialPage() {
           </button>
         </div>
       </section>
+
       {/* Tabla Comercial */}
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <table className="w-full text-left border-collapse">
@@ -467,7 +533,6 @@ export default function AdministracionComercialPage() {
                     >
                       <CreditCard size={14} /> Pagos
                     </button>
-                    
                     <button 
                       onClick={() => handleAbrirEditar(a)}
                       className="p-1.5 text-slate-600 hover:text-slate-900 border border-slate-200 rounded-lg hover:bg-slate-100 align-middle transition"
@@ -504,20 +569,17 @@ export default function AdministracionComercialPage() {
             <p className="text-xs text-slate-500">
               Escanea el código para precargar los datos de <strong>{empresaQrSeleccionada.nombre_cliente}</strong> en el formulario de Zoho.
             </p>
-
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-center">
               <QRCodeSVG 
                 value={`https://forms.zohopublic.com/rotaryconcordia1/form/Aceptacionterminossutrato/formperma/dEiuFyNghAj8CFZhy7d5P7knBvun9DFBkH6HX0l2Bh4?zf_lang=en&Field_3=${encodeURIComponent(empresaQrSeleccionada.rut_representante || '')}&Field_4=${encodeURIComponent(empresaQrSeleccionada.telefono || '')}&Field_5=${encodeURIComponent(empresaQrSeleccionada.correo || '')}&Field_6=${encodeURIComponent(empresaQrSeleccionada.nombre_cliente || '')}&Field_7=${encodeURIComponent(empresaQrSeleccionada.rut_empresa || '')}&Field_9=${encodeURIComponent(empresaQrSeleccionada.tipo_espacio || '')}`} 
                 size={180} 
               />
             </div>
-
             <div className="text-left bg-blue-50/60 p-3 rounded-lg text-[11px] text-slate-700 space-y-1">
               <p><strong>Representante:</strong> {empresaQrSeleccionada.representante_legal || '—'} ({empresaQrSeleccionada.rut_representante || '—'})</p>
               <p><strong>Empresa:</strong> {empresaQrSeleccionada.nombre_cliente} ({empresaQrSeleccionada.rut_empresa})</p>
               <p><strong>Oficina:</strong> {empresaQrSeleccionada.tipo_espacio}</p>
             </div>
-
             <button 
               onClick={() => setIsQrModalOpen(false)}
               className="w-full bg-[#181818] text-[#C5A059] font-bold py-2 rounded-lg text-xs hover:bg-black transition"
@@ -634,6 +696,7 @@ export default function AdministracionComercialPage() {
           </div>
         </div>
       )}
+
       {/* 🖤 MODAL 2: CONTROL DE PAGOS */}
       {isPagosModalOpen && empresaSeleccionada && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
@@ -642,7 +705,9 @@ export default function AdministracionComercialPage() {
             <div className="p-6 border-b border-slate-100 flex justify-between items-start sticky top-0 bg-white z-10">
               <div>
                 <p className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">CONTROL DE PAGOS</p>
-                <h3 className="text-xl font-black text-slate-900 mt-0.5">Registrar pago</h3>
+                <h3 className="text-xl font-black text-slate-900 mt-0.5">
+                  {editingPagoId ? 'Editar registro de pago' : 'Registrar pago'}
+                </h3>
                 <p className="text-xs text-slate-500">Empresa: <strong>{empresaSeleccionada.nombre_cliente}</strong> ({empresaSeleccionada.tipo_espacio})</p>
               </div>
               <button onClick={() => setIsPagosModalOpen(false)} className="text-slate-400 hover:text-slate-700">
@@ -654,7 +719,18 @@ export default function AdministracionComercialPage() {
               
               {/* Historial de Pagos */}
               <div>
-                <h4 className="font-bold text-slate-800 mb-2">Pagos e historial registrado ({historialPagos.length})</h4>
+                <div className="flex justify-between items-center mb-2">
+                  <h4 className="font-bold text-slate-800">Pagos e historial registrado ({historialPagos.length})</h4>
+                  {editingPagoId && (
+                    <button 
+                      type="button" 
+                      onClick={resetFormularioPago} 
+                      className="text-blue-600 hover:underline font-bold text-[11px]"
+                    >
+                      Cancelar edición / Nuevo pago
+                    </button>
+                  )}
+                </div>
                 <div className="border border-slate-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
                   <table className="w-full text-left border-collapse">
                     <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
@@ -666,17 +742,18 @@ export default function AdministracionComercialPage() {
                         <th className="p-2.5">LÍQUIDO</th>
                         <th className="p-2.5">PRÓXIMO PAGO</th>
                         <th className="p-2.5 text-center">COMPROBANTE</th>
+                        <th className="p-2.5 text-center">EDITAR</th>
                         <th className="p-2.5 text-center">ELIMINAR</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {loadingPagos ? (
-                        <tr><td colSpan={8} className="text-center py-4 text-slate-400">Cargando pagos...</td></tr>
+                        <tr><td colSpan={9} className="text-center py-4 text-slate-400">Cargando pagos...</td></tr>
                       ) : historialPagos.length === 0 ? (
-                        <tr><td colSpan={8} className="text-center py-4 text-slate-400">Sin historial de pagos registrados.</td></tr>
+                        <tr><td colSpan={9} className="text-center py-4 text-slate-400">Sin historial de pagos registrados.</td></tr>
                       ) : (
                         historialPagos.map((p) => (
-                          <tr key={p.id} className="hover:bg-slate-50">
+                          <tr key={p.id} className={`hover:bg-slate-50 ${editingPagoId === p.id ? 'bg-blue-50/60' : ''}`}>
                             <td className="p-2.5 font-bold text-slate-800">{p.fecha_pago}</td>
                             <td className="p-2.5 text-slate-600">{p.forma_pago}</td>
                             <td className="p-2.5 font-bold text-slate-900">${Number(p.monto_bruto).toLocaleString('es-CL')}</td>
@@ -688,7 +765,16 @@ export default function AdministracionComercialPage() {
                                 <a href={p.comprobante_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline flex items-center justify-center gap-1 font-bold">
                                   Ver <ExternalLink size={12} />
                                 </a>
-                              ) : '—'}
+                              ) : <span className="text-amber-600 italic">Sin archivo</span>}
+                            </td>
+                            <td className="p-2.5 text-center">
+                              <button 
+                                onClick={() => handleSeleccionarPagoParaEditar(p)}
+                                className="text-slate-600 hover:text-blue-600 p-1"
+                                title="Editar pago o adjuntar comprobante"
+                              >
+                                <Edit2 size={14} />
+                              </button>
                             </td>
                             <td className="p-2.5 text-center">
                               <button 
@@ -706,9 +792,17 @@ export default function AdministracionComercialPage() {
                   </table>
                 </div>
               </div>
+
               {/* Formulario de Pago */}
               <form onSubmit={handleGuardarPago} className="space-y-4 border-t border-slate-100 pt-5">
-                <h4 className="font-bold text-slate-900 text-sm">Datos del pago</h4>
+                <div className="flex justify-between items-center">
+                  <h4 className="font-bold text-slate-900 text-sm">
+                    {editingPagoId ? '✏️ Editando pago seleccionado' : 'Datos del nuevo pago'}
+                  </h4>
+                  {editingPagoId && (
+                    <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded">Modo edición activo</span>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Fecha de pago *</label>
@@ -745,6 +839,7 @@ export default function AdministracionComercialPage() {
                     />
                   </div>
                 </div>
+
                 <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
                   <div>
                     <p className="text-[10px] font-semibold text-slate-500">Monto bruto</p>
@@ -763,6 +858,7 @@ export default function AdministracionComercialPage() {
                     <p className="font-bold text-slate-800 text-xs mt-0.5">${montoLiquido.toLocaleString('es-CL')}</p>
                   </div>
                 </div>
+
                 <div className="pt-2 flex justify-end gap-3">
                   <button type="button" onClick={() => setIsPagosModalOpen(false)} className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700">
                     Cancelar
@@ -772,7 +868,7 @@ export default function AdministracionComercialPage() {
                     disabled={uploading} 
                     className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2 rounded-lg shadow transition disabled:opacity-50 flex items-center gap-2"
                   >
-                    {uploading ? 'Subiendo comprobante...' : 'Registrar pago'}
+                    {uploading ? 'Guardando...' : editingPagoId ? 'Actualizar pago' : 'Registrar pago'}
                   </button>
                 </div>
               </form>
