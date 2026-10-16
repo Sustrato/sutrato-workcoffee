@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { supabase } from '../services/supabase'
 import { Plus, Search, Building2, Edit, CalendarPlus, X } from 'lucide-react'
 
 interface Cliente {
@@ -20,13 +21,15 @@ export default function CateringClientesPage() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedTipo, setSelectedTipo] = useState('Todos los tipos')
+  const [loading, setLoading] = useState(false)
   
-  // Modales
+  // Modales y Estados de Edición
   const [isClientModalOpen, setIsClientModalOpen] = useState(false)
   const [isEventModalOpen, setIsEventModalOpen] = useState(false)
+  const [editingClienteId, setEditingClienteId] = useState<string | null>(null)
   const [selectedClienteParaEvento, setSelectedClienteParaEvento] = useState('')
 
-  // Estado formulario Nuevo Cliente
+  // Estado formulario Cliente (Nuevo / Editar)
   const [nuevoCliente, setNuevoCliente] = useState({
     tipo: 'Empresa privada',
     nombre: '',
@@ -42,11 +45,11 @@ export default function CateringClientesPage() {
   // Estado formulario Nueva Cotización / Evento
   const [nuevaCotizacion, setNuevaCotizacion] = useState({
     nroCotizacion: '2026-001',
-    fechaEmision: '15-10-2026',
+    fechaEmision: new Date().toISOString().split('T')[0],
     atencion: '',
     vigenciaDias: '10',
     nombreEvento: '',
-    fechaEvento: '15-10-2026',
+    fechaEvento: new Date().toISOString().split('T')[0],
     lugar: 'Frontis',
     horaInicio: '09:00',
     horaTermino: '13:00',
@@ -71,25 +74,43 @@ export default function CateringClientesPage() {
     }
   })
 
-  const handleSaveClient = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!nuevoCliente.nombre) return
-    const clienteCreado: Cliente = {
-      id: Date.now().toString(),
-      nombre: nuevoCliente.nombre,
-      rut: nuevoCliente.rut || 'Sin RUT',
-      tipo: nuevoCliente.tipo,
-      contacto: nuevoCliente.personaContacto || 'N/A',
-      telefono: nuevoCliente.telefono || 'N/A',
-      correo: nuevoCliente.correo || 'N/A',
-      eventosCount: 0,
-      totalFacturado: '$0',
-      requiereOC: nuevoCliente.requiereOC,
-      direccion: nuevoCliente.direccionFacturacion,
-      observaciones: nuevoCliente.observaciones
+  // Cargar clientes desde Supabase al iniciar
+  const fetchClientesSupabase = async () => {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('catering_clientes')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (data) {
+      const clientesMapeados: Cliente[] = data.map((c: any) => ({
+        id: c.id,
+        nombre: c.nombre_razon_social,
+        rut: c.rut || 'Sin RUT',
+        tipo: c.tipo_cliente,
+        contacto: c.persona_contacto || 'N/A',
+        telefono: c.telefono || 'N/A',
+        correo: c.correo || 'N/A',
+        eventosCount: 0,
+        totalFacturado: '$0',
+        requiereOC: c.requiere_oc || 'No',
+        direccion: c.direccion_facturacion || '',
+        observaciones: c.observaciones || ''
+      }))
+      setClientes(clientesMapeados)
     }
-    setClientes([clienteCreado, ...clientes])
-    setIsClientModalOpen(false)
+    if (error) {
+      console.error('Error al cargar clientes:', error.message)
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    fetchClientesSupabase()
+  }, [])
+
+  const resetFormularioCliente = () => {
+    setEditingClienteId(null)
     setNuevoCliente({
       tipo: 'Empresa privada',
       nombre: '',
@@ -101,6 +122,67 @@ export default function CateringClientesPage() {
       requiereOC: 'No',
       observaciones: ''
     })
+  }
+
+  // Abrir modal para Editar cargando los datos del cliente
+  const handleAbrirEditarCliente = (clienteOriginal: Cliente, rawData: any) => {
+    setEditingClienteId(clienteOriginal.id)
+    // Buscamos los datos originales exactos de Supabase si es necesario, o mapeamos
+    setNuevoCliente({
+      tipo: clienteOriginal.tipo,
+      nombre: clienteOriginal.nombre,
+      rut: clienteOriginal.rut === 'Sin RUT' ? '' : clienteOriginal.rut,
+      personaContacto: clienteOriginal.contacto === 'N/A' ? '' : clienteOriginal.contacto,
+      telefono: clienteOriginal.telefono === 'N/A' ? '' : clienteOriginal.telefono,
+      correo: clienteOriginal.correo === 'N/A' ? '' : clienteOriginal.correo,
+      direccionFacturacion: clienteOriginal.direccion,
+      requiereOC: clienteOriginal.requiereOC,
+      observaciones: clienteOriginal.observaciones
+    })
+    setIsClientModalOpen(true)
+  }
+
+  // Guardar (Crear o Actualizar) en Supabase
+  const handleSaveClient = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!nuevoCliente.nombre) return
+
+    const payload = {
+      tipo_cliente: nuevoCliente.tipo,
+      nombre_razon_social: nuevoCliente.nombre,
+      rut: nuevoCliente.rut,
+      persona_contacto: nuevoCliente.personaContacto,
+      telefono: nuevoCliente.telefono,
+      correo: nuevoCliente.correo,
+      direccion_facturacion: nuevoCliente.direccionFacturacion,
+      requiere_oc: nuevoCliente.requiereOC,
+      observaciones: nuevoCliente.observaciones
+    }
+
+    let error
+    if (editingClienteId) {
+      // Actualizar registro existente
+      const res = await supabase
+        .from('catering_clientes')
+        .update(payload)
+        .eq('id', editingClienteId)
+      error = res.error
+    } else {
+      // Crear nuevo registro
+      const res = await supabase
+        .from('catering_clientes')
+        .insert([payload])
+      error = res.error
+    }
+
+    if (error) {
+      alert('Error al guardar cliente en la base de datos: ' + error.message)
+    } else {
+      alert(editingClienteId ? '¡Cliente actualizado con éxito!' : '¡Cliente guardado con éxito en Supabase!')
+      setIsClientModalOpen(false)
+      resetFormularioCliente()
+      fetchClientesSupabase()
+    }
   }
 
   const handleOpenEventModal = (nombreCliente: string) => {
@@ -135,7 +217,10 @@ export default function CateringClientesPage() {
         </div>
         <button
           type="button"
-          onClick={() => setIsClientModalOpen(true)}
+          onClick={() => {
+            resetFormularioCliente()
+            setIsClientModalOpen(true)
+          }}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-amber-400"
         >
           <Plus size={18} />
@@ -185,7 +270,13 @@ export default function CateringClientesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {clientesFiltrados.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
+                    Cargando clientes desde Supabase...
+                  </td>
+                </tr>
+              ) : clientesFiltrados.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
                     No se encontraron clientes registrados.
@@ -219,6 +310,7 @@ export default function CateringClientesPage() {
                       <div className="flex items-center justify-end gap-2">
                         <button
                           type="button"
+                          onClick={() => handleAbrirEditarCliente(cliente, null)}
                           className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
                         >
                           <Edit size={14} /> Editar
@@ -240,15 +332,17 @@ export default function CateringClientesPage() {
         </div>
       </div>
 
-      {/* Modal Nuevo Cliente */}
+      {/* Modal Nuevo / Editar Cliente */}
       {isClientModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-100 bg-slate-900 px-6 py-4 text-white">
-              <h2 className="text-base font-bold">Nuevo cliente</h2>
+              <h2 className="text-base font-bold">
+                {editingClienteId ? 'Editar cliente' : 'Nuevo cliente'}
+              </h2>
               <button
                 type="button"
-                onClick={() => setIsClientModalOpen(false)}
+                onClick={() => { setIsClientModalOpen(false); resetFormularioCliente(); }}
                 className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
               >
                 <X size={18} />
@@ -355,7 +449,7 @@ export default function CateringClientesPage() {
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setIsClientModalOpen(false)}
+                  onClick={() => { setIsClientModalOpen(false); resetFormularioCliente(); }}
                   className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
                 >
                   Cancelar
@@ -364,7 +458,7 @@ export default function CateringClientesPage() {
                   type="submit"
                   className="rounded-xl bg-amber-500 px-6 py-2 text-sm font-bold text-slate-900 shadow-sm hover:bg-amber-400"
                 >
-                  Guardar cliente
+                  {editingClienteId ? 'Guardar cambios' : 'Guardar cliente'}
                 </button>
               </div>
             </form>
@@ -372,7 +466,7 @@ export default function CateringClientesPage() {
         </div>
       )}
 
-      {/* Modal Nueva cotización / evento */}
+      {/* Modal Nueva cotización / evento con todo su diseño original */}
       {isEventModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl">
@@ -408,7 +502,6 @@ export default function CateringClientesPage() {
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Atención / destinatario</label>
@@ -430,7 +523,6 @@ export default function CateringClientesPage() {
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Cliente *</label>
@@ -460,7 +552,6 @@ export default function CateringClientesPage() {
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Fecha *</label>
@@ -485,7 +576,6 @@ export default function CateringClientesPage() {
                   </select>
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Hora inicio</label>
@@ -506,7 +596,6 @@ export default function CateringClientesPage() {
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Modalidad *</label>
@@ -530,7 +619,6 @@ export default function CateringClientesPage() {
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Valor arriendo del espacio</label>
@@ -551,7 +639,6 @@ export default function CateringClientesPage() {
                   />
                 </div>
               </div>
-
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Preparaciones / menú</label>
                 <textarea
@@ -562,7 +649,6 @@ export default function CateringClientesPage() {
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
                 />
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Preparaciones especiales adicionales</label>
@@ -583,7 +669,6 @@ export default function CateringClientesPage() {
                   />
                 </div>
               </div>
-
               <div className="rounded-xl border border-slate-200 p-4 bg-slate-50/50 space-y-3">
                 <h3 className="text-sm font-bold text-slate-900">Equipamiento</h3>
                 {[
@@ -621,7 +706,6 @@ export default function CateringClientesPage() {
                   </div>
                 ))}
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Condición de pago</label>
@@ -645,7 +729,6 @@ export default function CateringClientesPage() {
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Fecha vencimiento</label>
@@ -670,7 +753,6 @@ export default function CateringClientesPage() {
                   </select>
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Orden de compra / referencia</label>
@@ -691,7 +773,6 @@ export default function CateringClientesPage() {
                   />
                 </div>
               </div>
-
               <div className="rounded-xl bg-slate-900 text-white p-4 space-y-2 text-sm">
                 <div className="flex justify-between py-1 border-b border-slate-800">
                   <span className="text-slate-400">Arriendo</span>
@@ -718,7 +799,6 @@ export default function CateringClientesPage() {
                   <span>${saldoVal.toLocaleString('es-CL')}</span>
                 </div>
               </div>
-
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
