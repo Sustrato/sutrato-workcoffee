@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
-import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download } from 'lucide-react'
+import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
 interface ClienteParticular {
@@ -35,7 +35,6 @@ interface UsoOficina {
   fecha_aceptacion_bases?: string
 }
 
-// Función que elimina puntos, guiones y espacios de cualquier RUT
 const normalizarRut = (valor: string) => {
   if (!valor) return ''
   return valor.toLowerCase().replace(/[\.\-\s]/g, '')
@@ -46,23 +45,21 @@ export default function ClientesParticularesPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
   
-  // Control de modales
   const [isClienteModalOpen, setIsClienteModalOpen] = useState(false)
   const [isArriendoModalOpen, setIsArriendoModalOpen] = useState(false)
   const [isQrModalOpen, setIsQrModalOpen] = useState(false)
   
-  // Cliente seleccionado para ver el QR
   const [clienteQrSeleccionado, setClienteQrSeleccionado] = useState<any>(null)
   
-  // Estado para Edición de Cliente y Edición de Visita/Arriendo
   const [editingClienteId, setEditingClienteId] = useState<string | null>(null)
   const [editingVisitaId, setEditingVisitaId] = useState<string | null>(null)
   
-  // Modal de confirmación de eliminación segura
   const [clienteAEliminar, setClienteAEliminar] = useState<ClienteParticular | null>(null)
   const [confirmacionTexto, setConfirmacionTexto] = useState('')
+
+  const [visitaAEliminar, setVisitaAEliminar] = useState<UsoOficina | null>(null)
+  const [confirmacionVisitaTexto, setConfirmacionVisitaTexto] = useState('')
   
-  // Campos de Cliente Particular (Crear / Editar)
   const [nombreCompleto, setNombreCompleto] = useState('')
   const [rut, setRut] = useState('')
   const [telefono, setTelefono] = useState('')
@@ -71,17 +68,14 @@ export default function ClientesParticularesPage() {
   const [rutEmpresa, setRutEmpresa] = useState('')
   const [obsCliente, setObsCliente] = useState('')
   
-  // Campos del Modal "Registrar / Editar arriendo"
   const [clienteSeleccionadoId, setClienteSeleccionadoId] = useState('')
   const [oficina, setOficina] = useState('Oficina 1')
   const [fechaIngreso, setFechaIngreso] = useState(new Date().toISOString().split('T')[0])
   const [fechaTermino, setFechaTermino] = useState(new Date().toISOString().split('T')[0])
   const [modalidad, setModalidad] = useState('Por hora')
   
-  // Historial de visitas del cliente seleccionado
   const [historialVisitasCliente, setHistorialVisitasCliente] = useState<UsoOficina[]>([])
   
-  // Horarios
   const [horaIngreso, setHoraIngreso] = useState('09:00')
   const [horaSalida, setHoraSalida] = useState('10:00')
   
@@ -89,13 +83,12 @@ export default function ClientesParticularesPage() {
   const [valorCalculado, setValorCalculado] = useState(3000)
   const [estadoPago, setEstadoPago] = useState('Pagado')
   
-  // Estado para subida de archivo de Voucher
   const [voucherFile, setVoucherFile] = useState<File | null>(null)
+  const [voucherActualUrl, setVoucherActualUrl] = useState<string>('')
   const [uploadingVoucher, setUploadingVoucher] = useState(false)
   const [basesAceptadas, setBasesAceptadas] = useState(false)
   const [fechaAceptacion, setFechaAceptacion] = useState(new Date().toISOString().split('T')[0])
   
-  // Oficinas deshabilitadas y detalle del motivo/horario
   const [oficinasBloqueadas, setOficinasBloqueadas] = useState<string[]>([])
   const [detallesBloqueo, setDetallesBloqueo] = useState<Record<string, string>>({})
   
@@ -182,6 +175,7 @@ export default function ClientesParticularesPage() {
   const resetFormularioArriendo = () => {
     setEditingVisitaId(null)
     setVoucherFile(null)
+    setVoucherActualUrl('')
     setEstadoPago('Pagado')
   }
 
@@ -219,6 +213,29 @@ export default function ClientesParticularesPage() {
     setModalidad(visita.modalidad || 'Por hora')
     setEstadoPago(visita.estado_pago || 'Pagado')
     setBasesAceptadas(visita.bases_aceptadas ?? true)
+    setVoucherActualUrl(visita.voucher_url || '')
+    setVoucherFile(null)
+  }
+
+  // Función para abrir vouchers privados de forma segura mediante URL firmada
+  const handleVerVoucherSeguro = async (urlOriginal: string) => {
+    if (!urlOriginal) return
+    try {
+      const partes = urlOriginal.split('/')
+      const nombreArchivo = partes[partes.length - 1]
+
+      const { data, error } = await supabase.storage
+        .from('vouchers')
+        .createSignedUrl(nombreArchivo, 60)
+
+      if (error) throw error
+
+      if (data?.signedUrl) {
+        window.open(data.signedUrl, '_blank')
+      }
+    } catch (err: any) {
+      alert('Error al abrir el voucher: ' + err.message)
+    }
   }
 
   const verificarDisponibilidad = async () => {
@@ -339,6 +356,23 @@ export default function ClientesParticularesPage() {
     }
   }
 
+  const handleConfirmarEliminarVisita = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!visitaAEliminar) return
+    if (confirmacionVisitaTexto.trim() !== 'ELIMINAR') {
+      return alert('Debes escribir la palabra exacta ELIMINAR para proceder con el borrado del pago.')
+    }
+    const { error } = await supabase.from('uso_oficinas_particulares').delete().eq('id', visitaAEliminar.id)
+    if (error) {
+      alert('Error al eliminar el registro: ' + error.message)
+    } else {
+      alert('Registro de visita/pago eliminado definitivamente.')
+      setVisitaAEliminar(null)
+      setConfirmacionVisitaTexto('')
+      fetchHistorialVisitas(clienteSeleccionadoId)
+    }
+  }
+
   const handleGuardarArriendo = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!basesAceptadas) {
@@ -348,7 +382,8 @@ export default function ClientesParticularesPage() {
       return alert(`La ${oficina} no está disponible en este horario (${detallesBloqueo[oficina]}).`)
     }
     setUploadingVoucher(true)
-    let finalVoucherUrl = ''
+    let finalVoucherUrl = voucherActualUrl
+    
     if (voucherFile) {
       const fileExt = voucherFile.name.split('.').pop()
       const fileName = `voucher_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
@@ -365,6 +400,7 @@ export default function ClientesParticularesPage() {
         .getPublicUrl(filePath)
       finalVoucherUrl = publicURLData.publicUrl
     }
+
     const payloadArriendo: any = {
       cliente_id: clienteSeleccionadoId,
       oficina_asignada: oficina,
@@ -377,11 +413,10 @@ export default function ClientesParticularesPage() {
       monto_total: Number(valorCalculado),
       estado_pago: estadoPago,
       bases_aceptadas: basesAceptadas,
-      fecha_aceptacion_bases: fechaAceptacion
+      fecha_aceptacion_bases: fechaAceptacion,
+      voucher_url: finalVoucherUrl || null
     }
-    if (finalVoucherUrl) {
-      payloadArriendo.voucher_url = finalVoucherUrl
-    }
+
     let error
     if (editingVisitaId) {
       const res = await supabase.from('uso_oficinas_particulares').update(payloadArriendo).eq('id', editingVisitaId)
@@ -401,7 +436,6 @@ export default function ClientesParticularesPage() {
     }
   }
 
-  // Filtrado blindado que limpia ambos lados (búsqueda y base de datos)
   const queryLimpio = normalizarRut(searchTerm)
   const clientesFiltered = clientes.filter(c => {
     const nombreMatch = c.nombre_completo?.toLowerCase().includes(searchTerm.toLowerCase()) || false
@@ -685,9 +719,9 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* ⚠️ MODAL 3: ELIMINACIÓN */}
+      {/* ⚠️ MODAL: ELIMINACIÓN DE CLIENTE */}
       {clienteAEliminar && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
             <div className="bg-rose-600 text-white px-6 py-4 flex justify-between items-center">
               <h3 className="font-bold text-base">Eliminar cliente particular</h3>
@@ -736,7 +770,58 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* 🖤 MODAL 2: REGISTRAR / EDITAR ARRIENDO CON HISTORIAL Y QR SOHO */}
+      {/* ⚠️ MODAL: ELIMINACIÓN DE VISITA / PAGO (Z-INDEX ALTO Y CENTRADO) */}
+      {visitaAEliminar && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[999]">
+          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
+            <div className="bg-rose-600 text-white px-6 py-4 flex justify-between items-center">
+              <h3 className="font-bold text-base">Eliminar registro de pago / visita</h3>
+              <button onClick={() => setVisitaAEliminar(null)} className="text-white/80 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleConfirmarEliminarVisita} className="p-6 space-y-4 text-xs">
+              <p className="text-slate-700 font-medium">
+                ¿Estás seguro de que deseas eliminar la visita del <strong>{visitaAEliminar.fecha_inicio}</strong> ({visitaAEliminar.oficina_asignada})?
+              </p>
+              
+              <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-rose-900 text-[11px] leading-relaxed">
+                Escribe <strong className="underline">ELIMINAR</strong> a continuación para confirmar el borrado definitivo de este pago.
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Confirmación *</label>
+                <input 
+                  type="text" 
+                  placeholder="Escribe ELIMINAR"
+                  value={confirmacionVisitaTexto}
+                  onChange={(e) => setConfirmacionVisitaTexto(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none font-bold text-rose-600 uppercase"
+                  required
+                />
+              </div>
+              <div className="pt-2 flex justify-end gap-3">
+                <button 
+                  type="button" 
+                  onClick={() => setVisitaAEliminar(null)} 
+                  className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={confirmacionVisitaTexto.trim() !== 'ELIMINAR'}
+                  className="bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white font-bold px-5 py-2 rounded-lg shadow transition"
+                >
+                  Presiona ELIMINAR
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🖤 MODAL 2: REGISTRAR / EDITAR ARRIENDO CON HISTORIAL Y VOUCHER SEGURO */}
       {isArriendoModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -777,28 +862,61 @@ export default function ClientesParticularesPage() {
                     <strong className="text-[#C5A059]">{totalHorasAcumuladas.toFixed(1)} hrs</strong>
                   </div>
                 </div>
+
                 {historialVisitasCliente.length > 0 && (
                   <div className="space-y-1">
                     <p className="font-bold text-slate-600 text-[10px] uppercase tracking-wider">
-                      Historial de visitas (Haz clic en una para editarla o cambiar su estado a Pagado):
+                      Historial de visitas (Haz clic en una para editarla):
                     </p>
-                    <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                    <div className="max-h-32 overflow-y-auto space-y-1.5 pr-1">
                       {historialVisitasCliente.map((visita) => (
                         <div 
                           key={visita.id} 
-                          onClick={() => handleSeleccionarVisitaParaEditar(visita)}
-                          className={`flex justify-between items-center bg-white px-3 py-1.5 rounded border cursor-pointer transition ${editingVisitaId === visita.id ? 'border-[#C5A059] bg-amber-50/60 ring-1 ring-[#C5A059]' : 'border-slate-100 hover:bg-slate-100'}`}
+                          className={`flex justify-between items-center bg-white px-3 py-2 rounded-lg border transition ${editingVisitaId === visita.id ? 'border-[#C5A059] bg-amber-50/60 ring-1 ring-[#C5A059]' : 'border-slate-200 hover:bg-slate-50'}`}
                         >
-                          <span>📅 {visita.fecha_inicio} ({visita.hora_inicio} - {visita.hora_fin})</span>
-                          <span className="font-semibold text-slate-700">{visita.oficina_asignada} [{visita.horas_calculadas}h]</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${visita.estado_pago === 'Pagado' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                            {visita.estado_pago}
+                          <span 
+                            onClick={() => handleSeleccionarVisitaParaEditar(visita)} 
+                            className="cursor-pointer flex-1"
+                          >
+                            📅 {visita.fecha_inicio} ({visita.hora_inicio} - {visita.hora_fin}) — <strong className="text-slate-700">{visita.oficina_asignada} [{visita.horas_calculadas}h]</strong>
                           </span>
+                          
+                          <div className="flex items-center gap-2">
+                            {/* BOTÓN VOUCHER SEGURO DIRECTO EN EL HISTORIAL */}
+                            {visita.voucher_url ? (
+                              <button 
+                                type="button"
+                                onClick={() => handleVerVoucherSeguro(visita.voucher_url!)}
+                                className="inline-flex items-center gap-1 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 px-2 py-1 rounded text-[10px] font-bold transition"
+                                title="Ver comprobante/voucher"
+                              >
+                                <ExternalLink size={11} /> Voucher
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 italic">Sin voucher</span>
+                            )}
+
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${visita.estado_pago === 'Pagado' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                              {visita.estado_pago}
+                            </span>
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setVisitaAEliminar(visita)
+                                setConfirmacionVisitaTexto('')
+                              }}
+                              className="text-rose-500 hover:text-rose-700 p-1.5 border border-rose-200 rounded-lg hover:bg-rose-50 transition"
+                              title="Eliminar este pago/visita"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
+
                 {editingVisitaId && (
                   <div className="flex justify-between items-center bg-amber-100/70 border border-amber-300 p-2 rounded-lg text-[11px] text-amber-900">
                     <span>✏️ Estás editando una visita seleccionada del historial.</span>
@@ -808,6 +926,7 @@ export default function ClientesParticularesPage() {
                   </div>
                 )}
               </div>
+
               {/* Formulario de la visita */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -873,9 +992,24 @@ export default function ClientesParticularesPage() {
               <div className="text-[11px] text-slate-500 font-medium italic">
                 {horaIngreso} a {horaSalida} · {Math.round(horasCalculadas * 60)} minutos ({horasCalculadas} h) × ${modalidad === 'Por hora' ? '3.000 /h ($50/min)' : 'Tarifa fija'} = ${valorCalculado.toLocaleString('es-CL')}
               </div>
+
               {/* SECCIÓN VOUCHER COMO ARCHIVO */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Comprobante de pago / Voucher (Archivo)</label>
+                
+                {voucherActualUrl && !voucherFile && (
+                  <div className="mb-2 flex items-center justify-between bg-emerald-50 border border-emerald-200 p-2 rounded-lg text-[11px]">
+                    <span className="text-emerald-800 font-medium truncate max-w-xs">📎 Voucher guardado actual</span>
+                    <button 
+                      type="button" 
+                      onClick={() => handleVerVoucherSeguro(voucherActualUrl)} 
+                      className="text-emerald-700 font-bold underline hover:text-emerald-900"
+                    >
+                      Ver archivo actual
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2 border border-slate-300 rounded-lg p-2 bg-white">
                   <Upload size={16} className="text-slate-400 shrink-0" />
                   <input 
@@ -891,10 +1025,11 @@ export default function ClientesParticularesPage() {
                 </div>
                 {voucherFile && (
                   <p className="mt-1 text-[11px] text-emerald-600 font-medium">
-                    Archivo seleccionado: {voucherFile.name}
+                    Nuevo archivo seleccionado: {voucherFile.name}
                   </p>
                 )}
               </div>
+
               {/* SECCIÓN QR SOHO Y BASES DE USO FÍSICO */}
               <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-4 space-y-3">
                 <div className="flex justify-between items-center">
@@ -917,6 +1052,7 @@ export default function ClientesParticularesPage() {
                   </div>
                 )}
               </div>
+
               <div className="pt-2 flex justify-end gap-2">
                 <button type="button" onClick={() => { setIsArriendoModalOpen(false); resetFormularioArriendo(); }} className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700 hover:bg-slate-50 transition">
                   Cancelar
