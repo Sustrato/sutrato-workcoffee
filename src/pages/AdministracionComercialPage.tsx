@@ -25,6 +25,11 @@ export default function AdministracionComercialPage() {
   const [isQrModalOpen, setIsQrModalOpen] = useState(false)
   const [empresaQrSeleccionada, setEmpresaQrSeleccionada] = useState<any>(null)
   
+  // Estado para el Modal de Eliminación Personalizado tipo Imagen
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [empresaAEliminar, setEmpresaAEliminar] = useState<any>(null)
+  const [textoConfirmacion, setTextoConfirmacion] = useState('')
+
   // Estado para saber si estamos Creando o Editando Empresa
   const [editingId, setEditingId] = useState<string | null>(null)
   
@@ -67,9 +72,10 @@ export default function AdministracionComercialPage() {
     .filter(a => a.estado === 'Activo' && a.id !== editingId)
     .map(a => a.tipo_espacio)
 
-  // Cálculos de IVA y Neto
+  // Cálculos matemáticos solicitados
   const netoCalculado = Math.round(montoBruto / 1.19)
   const ivaCalculado = montoBruto - netoCalculado
+  const comisionTarjetaCalculada = Math.max(0, montoBruto - montoLiquido)
 
   const fetchArriendos = async () => {
     setLoading(true)
@@ -127,7 +133,7 @@ export default function AdministracionComercialPage() {
     setFechaPago(pago.fecha_pago || new Date().toISOString().split('T')[0])
     setFormaPago(pago.forma_pago || 'Transferencia')
     setMontoBruto(pago.monto_bruto || 350000)
-    setMontoLiquido(pago.monto_liquido || 350000)
+    setMontoLiquido(pago.monto_liquido || pago.monto_bruto || 350000)
     setProximoPago(pago.proximo_pago || '')
     setComprobanteFile(null)
   }
@@ -136,12 +142,13 @@ export default function AdministracionComercialPage() {
     setEditingPagoId(null)
     setComprobanteFile(null)
     if (empresaSeleccionada) {
-      setMontoBruto(empresaSeleccionada.monto_mensual || 350000)
-      setMontoLiquido(empresaSeleccionada.monto_mensual || 350000)
+      const montoBase = empresaSeleccionada.monto_mensual || 350000
+      setMontoBruto(montoBase)
+      setMontoLiquido(montoBase)
     }
   }
 
-  // 📄 Ver el Payload de Zoho
+  // Ver el Payload de Zoho
   const handleVerZohoPayload = (empresaItem: any) => {
     if (!empresaItem.zoho_payload) {
       alert("Este cliente aún no ha enviado el formulario de Zoho.")
@@ -153,10 +160,33 @@ export default function AdministracionComercialPage() {
     window.open(url, '_blank')
   }
 
-  // 📱 Abrir Modal QR
+  // Abrir Modal QR
   const handleAbrirQr = (empresaItem: any) => {
     setEmpresaQrSeleccionada(empresaItem)
     setIsQrModalOpen(true)
+  }
+
+  // Abrir Modal de Eliminación Personalizado
+  const handleAbrirModalEliminar = (empresaItem: any) => {
+    setEmpresaAEliminar(empresaItem)
+    setTextoConfirmacion('')
+    setIsDeleteModalOpen(true)
+  }
+
+  // Ejecutar Eliminación Definitiva desde el Modal Estilizado
+  const handleConfirmarEliminar = async () => {
+    if (textoConfirmacion !== 'ELIMINAR') {
+      return alert('Debes escribir "ELIMINAR" en mayúsculas para confirmar.')
+    }
+    const { error } = await supabase.from('oficinas_fisicas').delete().eq('id', empresaAEliminar.id)
+    if (!error) {
+      alert('Empresa eliminada de manera definitiva.')
+      setIsDeleteModalOpen(false)
+      setEmpresaAEliminar(null)
+      fetchArriendos()
+    } else {
+      alert('Error al eliminar empresa: ' + error.message)
+    }
   }
 
   // Auto-calcular fecha del próximo pago según frecuencia
@@ -186,15 +216,16 @@ export default function AdministracionComercialPage() {
 
   const handleAbrirPagos = (empresaItem: any) => {
     setEmpresaSeleccionada(empresaItem)
-    setMontoBruto(empresaItem.monto_mensual || 350000)
-    setMontoLiquido(empresaItem.monto_mensual || 350000)
+    const montoBase = empresaItem.monto_mensual || 350000
+    setMontoBruto(montoBase)
+    setMontoLiquido(montoBase)
     setFrecuencia(empresaItem.frecuencia || 'MENSUAL')
     resetFormularioPago()
     setIsPagosModalOpen(true)
     fetchHistorialPagos(empresaItem.id)
   }
 
-  // 📄 Abrir o Generar Contrato seguro
+  // Abrir o Generar Contrato seguro
   const handleAbrirContrato = async (empresaItem: any) => {
     if (empresaItem.contrato_url) {
       window.open(empresaItem.contrato_url, '_blank')
@@ -229,7 +260,6 @@ export default function AdministracionComercialPage() {
         return null
       }
       
-      // Obtener URL pública de manera segura
       const { data } = supabase.storage
         .from(BUCKET_NAME)
         .getPublicUrl(fileName)
@@ -241,7 +271,7 @@ export default function AdministracionComercialPage() {
     }
   }
 
-  // 💾 Guardar (Crear o Editar Empresa)
+  // Guardar (Crear o Editar Empresa)
   const handleGuardarEmpresa = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!empresa || !rutEmpresa) return alert('Completa los campos obligatorios (*)')
@@ -310,9 +340,10 @@ export default function AdministracionComercialPage() {
       monto_neto: netoCalculado,
       iva: ivaCalculado,
       monto_liquido: montoLiquido,
+      comision_tarjeta: comisionTarjetaCalculada,
       proximo_pago: proximoPago
     }
-
+    
     if (urlComprobante) {
       payloadPago.comprobante_url = urlComprobante
     }
@@ -372,23 +403,6 @@ export default function AdministracionComercialPage() {
       fetchArriendos()
     } else {
       alert('Error al eliminar el pago: ' + error.message)
-    }
-  }
-
-  const handleEliminar = async (empresaItem: any) => {
-    const confirmacion = prompt(
-      `⚠️ ATENCIÓN: Esta acción eliminará permanentemente la empresa "${empresaItem.nombre_cliente}" y sus contratos/pagos asociados.\n\nEscribe "ELIMINAR" en mayúsculas para confirmar:`
-    )
-    if (confirmacion === 'ELIMINAR') {
-      const { error } = await supabase.from('oficinas_fisicas').delete().eq('id', empresaItem.id)
-      if (!error) {
-        alert('Empresa eliminada de manera definitiva.')
-        fetchArriendos()
-      } else {
-        alert('Error al eliminar empresa: ' + error.message)
-      }
-    } else if (confirmacion !== null) {
-      alert('Confirmación incorrecta. No se realizaron cambios.')
     }
   }
 
@@ -475,7 +489,6 @@ export default function AdministracionComercialPage() {
                       {a.frecuencia || 'MENSUAL'}
                     </span>
                   </td>
-                  {/* 🟢 COLUMNA TÉRMINOS / ZOHO */}
                   <td className="py-4 px-4">
                     <div className="flex flex-col gap-1 items-start">
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -510,7 +523,6 @@ export default function AdministracionComercialPage() {
                       • {a.vigencia || 'VIGENTE'}
                     </span>
                   </td>
-                  {/* 📄 COLUMNA DE CONTRATO */}
                   <td className="py-4 px-4 text-center">
                     <button
                       onClick={() => handleAbrirContrato(a)}
@@ -524,7 +536,6 @@ export default function AdministracionComercialPage() {
                       {a.contrato_url ? 'Ver contrato' : 'Generar / Editar'}
                     </button>
                   </td>
-                  {/* ⚙️ ACCIONES */}
                   <td className="py-4 px-4 text-right space-x-1.5">
                     <button 
                       onClick={() => handleAbrirPagos(a)}
@@ -541,7 +552,7 @@ export default function AdministracionComercialPage() {
                       <Edit2 size={14} />
                     </button>
                     <button 
-                      onClick={() => handleEliminar(a)} 
+                      onClick={() => handleAbrirModalEliminar(a)} 
                       className="p-1.5 text-rose-500 hover:text-rose-700 border border-rose-200 hover:bg-rose-50 rounded-lg align-middle transition"
                       title="Eliminar empresa"
                     >
@@ -555,7 +566,67 @@ export default function AdministracionComercialPage() {
         </table>
       </section>
 
-      {/* 📱 MODAL DE CÓDIGO QR */}
+      {/* 🛑 MODAL DE ELIMINACIÓN ESTILIZADO (TIPO IMAGEN) */}
+      {isDeleteModalOpen && empresaAEliminar && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-rose-100">
+            
+            {/* Cabecera Rosa */}
+            <div className="bg-[#E11D48] text-white px-6 py-4 flex justify-between items-center">
+              <h3 className="font-bold text-base tracking-wide">Eliminar empresa comercial</h3>
+              <button onClick={() => setIsDeleteModalOpen(false)} className="text-white/80 hover:text-white transition">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 text-xs">
+              <p className="text-slate-800 text-sm font-medium">
+                ¿Estás seguro de que deseas eliminar a <strong>{empresaAEliminar.nombre_cliente}</strong>?
+              </p>
+
+              {/* Caja de advertencia */}
+              <div className="bg-rose-50 border border-rose-200 text-rose-900 p-4 rounded-xl space-y-1">
+                <p>
+                  Escribe <strong className="underline font-black">ELIMINAR</strong> a continuación para confirmar que deseas borrar este registro definitivamente del sistema.
+                </p>
+              </div>
+
+              {/* Input de confirmación */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1.5">Confirmación *</label>
+                <input 
+                  type="text" 
+                  placeholder="ESCRIBE ELIMINAR"
+                  value={textoConfirmacion}
+                  onChange={(e) => setTextoConfirmacion(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 text-xs font-bold uppercase placeholder:font-normal placeholder:text-rose-300 text-rose-600"
+                />
+              </div>
+
+              {/* Botones de acción */}
+              <div className="pt-2 flex justify-end gap-3">
+                <button 
+                  type="button" 
+                  onClick={() => setIsDeleteModalOpen(false)}
+                  className="px-5 py-2.5 border border-slate-300 rounded-xl font-bold text-slate-700 hover:bg-slate-50 transition text-xs"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button"
+                  disabled={textoConfirmacion !== 'ELIMINAR'}
+                  onClick={handleConfirmarEliminar}
+                  className="bg-[#FB7185] hover:bg-[#F43F5E] text-white font-bold px-6 py-2.5 rounded-xl shadow transition disabled:opacity-40 disabled:cursor-not-allowed text-xs"
+                >
+                  Presiona ELIMINAR
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CÓDIGO QR */}
       {isQrModalOpen && empresaQrSeleccionada && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl p-6 text-center space-y-4">
@@ -590,7 +661,7 @@ export default function AdministracionComercialPage() {
         </div>
       )}
 
-      {/* 🖤 MODAL 1: NUEVA / EDITAR EMPRESA */}
+      {/* MODAL 1: NUEVA / EDITAR EMPRESA */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl">
@@ -697,10 +768,10 @@ export default function AdministracionComercialPage() {
         </div>
       )}
 
-      {/* 🖤 MODAL 2: CONTROL DE PAGOS */}
+      {/* MODAL 2: CONTROL DE PAGOS */}
       {isPagosModalOpen && empresaSeleccionada && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
             
             <div className="p-6 border-b border-slate-100 flex justify-between items-start sticky top-0 bg-white z-10">
               <div>
@@ -731,8 +802,8 @@ export default function AdministracionComercialPage() {
                     </button>
                   )}
                 </div>
-                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
-                  <table className="w-full text-left border-collapse">
+                <div className="border border-slate-200 rounded-xl overflow-x-auto max-h-48 overflow-y-auto">
+                  <table className="w-full text-left border-collapse min-w-[850px]">
                     <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
                       <tr>
                         <th className="p-2.5">FECHA</th>
@@ -740,6 +811,7 @@ export default function AdministracionComercialPage() {
                         <th className="p-2.5">BRUTO</th>
                         <th className="p-2.5">NETO</th>
                         <th className="p-2.5">LÍQUIDO</th>
+                        <th className="p-2.5">COMISIÓN</th>
                         <th className="p-2.5">PRÓXIMO PAGO</th>
                         <th className="p-2.5 text-center">COMPROBANTE</th>
                         <th className="p-2.5 text-center">EDITAR</th>
@@ -748,9 +820,9 @@ export default function AdministracionComercialPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {loadingPagos ? (
-                        <tr><td colSpan={9} className="text-center py-4 text-slate-400">Cargando pagos...</td></tr>
+                        <tr><td colSpan={10} className="text-center py-4 text-slate-400">Cargando pagos...</td></tr>
                       ) : historialPagos.length === 0 ? (
-                        <tr><td colSpan={9} className="text-center py-4 text-slate-400">Sin historial de pagos registrados.</td></tr>
+                        <tr><td colSpan={10} className="text-center py-4 text-slate-400">Sin historial de pagos registrados.</td></tr>
                       ) : (
                         historialPagos.map((p) => (
                           <tr key={p.id} className={`hover:bg-slate-50 ${editingPagoId === p.id ? 'bg-blue-50/60' : ''}`}>
@@ -759,6 +831,7 @@ export default function AdministracionComercialPage() {
                             <td className="p-2.5 font-bold text-slate-900">${Number(p.monto_bruto).toLocaleString('es-CL')}</td>
                             <td className="p-2.5 text-slate-600">${Number(p.monto_neto).toLocaleString('es-CL')}</td>
                             <td className="p-2.5 font-bold text-emerald-700">${Number(p.monto_liquido).toLocaleString('es-CL')}</td>
+                            <td className="p-2.5 text-amber-700">${Number(p.comision_tarjeta || 0).toLocaleString('es-CL')}</td>
                             <td className="p-2.5 text-slate-700">{p.proximo_pago}</td>
                             <td className="p-2.5 text-center">
                               {p.comprobante_url ? (
@@ -819,11 +892,11 @@ export default function AdministracionComercialPage() {
                   </div>
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Monto bruto *</label>
-                    <input type="number" value={montoBruto} onChange={(e) => { setMontoBruto(Number(e.target.value)); setMontoLiquido(Number(e.target.value)); }} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none font-bold text-slate-900" required />
+                    <input type="number" value={montoBruto} onChange={(e) => setMontoBruto(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none font-bold text-slate-900" required />
                   </div>
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Monto líquido recibido</label>
-                    <input type="number" value={montoLiquido} onChange={(e) => setMontoLiquido(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
+                    <label className="block font-bold text-slate-700 mb-1">Monto líquido recibido (Manual)</label>
+                    <input type="number" value={montoLiquido} onChange={(e) => setMontoLiquido(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none font-bold text-emerald-700" />
                   </div>
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Próximo pago *</label>
@@ -855,7 +928,11 @@ export default function AdministracionComercialPage() {
                   </div>
                   <div>
                     <p className="text-[10px] font-semibold text-slate-500">Líquido recibido</p>
-                    <p className="font-bold text-slate-800 text-xs mt-0.5">${montoLiquido.toLocaleString('es-CL')}</p>
+                    <p className="font-bold text-emerald-700 text-xs mt-0.5">${montoLiquido.toLocaleString('es-CL')}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-semibold text-slate-500">Comisión tarjeta</p>
+                    <p className="font-bold text-amber-700 text-xs mt-0.5">${comisionTarjetaCalculada.toLocaleString('es-CL')}</p>
                   </div>
                 </div>
 

@@ -11,12 +11,13 @@ interface ReporteUnificado {
   frecuencia: string
   fecha: string
   recaudacion: number
+  comision: number
 }
 
 export default function ReportesPage() {
   const [datosReporte, setDatosReporte] = useState<ReporteUnificado[]>([])
   const [loading, setLoading] = useState(false)
-
+  
   // Filtros por Año, Mes y Buscador
   const [selectedAnio, setSelectedAnio] = useState('Todos los años')
   const [selectedMes, setSelectedMes] = useState('Todos los meses')
@@ -29,8 +30,8 @@ export default function ReportesPage() {
     const { data: empresas } = await supabase
       .from('oficinas_fisicas')
       .select('*')
-
-    // 2. Obtener clientes particulares
+      
+    // 2. Obtener clientes particulares (incluyendo campos financieros si existen)
     const { data: particulares } = await supabase
       .from('uso_oficinas_particulares')
       .select('*, clientes_particulares(nombre_completo, rut)')
@@ -39,6 +40,8 @@ export default function ReportesPage() {
 
     if (empresas) {
       empresas.forEach(e => {
+        const monto = Number(e.monto_mensual) || 0
+        const comision = Number(e.comision_tarjeta) || 0
         listaUnificada.push({
           id: e.id,
           nombre: e.nombre_cliente || 'Sin nombre',
@@ -47,13 +50,16 @@ export default function ReportesPage() {
           estado: e.estado || 'Activo',
           frecuencia: 'Mensual',
           fecha: e.fecha_inicio || '',
-          recaudacion: Number(e.monto_mensual) || 0
+          recaudacion: monto,
+          comision: comision
         })
       })
     }
 
     if (particulares) {
       particulares.forEach((p: any) => {
+        const monto = Number(p.monto_total) || 0
+        const comision = Number(p.comision_tarjeta) || 0
         listaUnificada.push({
           id: p.id,
           nombre: p.clientes_particulares?.nombre_completo || 'Cliente Particular',
@@ -62,7 +68,8 @@ export default function ReportesPage() {
           estado: p.estado_pago || 'Pagado',
           frecuencia: p.modalidad || 'Por hora',
           fecha: p.fecha_inicio || '',
-          recaudacion: Number(p.monto_total) || 0
+          recaudacion: monto,
+          comision: comision
         })
       })
     }
@@ -92,10 +99,9 @@ export default function ReportesPage() {
     const fecha = item.fecha || ''
     const anioItem = fecha.substring(0, 4)
     const mesItem = fecha.substring(5, 7)
-
+    
     const matchAnio = selectedAnio === 'Todos los años' || anioItem === selectedAnio
     const matchMes = selectedMes === 'Todos los meses' || mesItem === mesANumero[selectedMes]
-
     const matchTexto = 
       item.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.rut.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -104,18 +110,19 @@ export default function ReportesPage() {
     return matchAnio && matchMes && matchTexto
   })
 
+  // Cálculos globales ajustados con la comisión
   const recaudacionTotal = datosFiltrados.reduce((acc, curr) => acc + curr.recaudacion, 0)
   const ivaTotal = Math.round(recaudacionTotal * 0.19)
-  const utilidadNeta = recaudacionTotal - ivaTotal
+  const comisionTotal = datosFiltrados.reduce((acc, curr) => acc + curr.comision, 0)
+  const utilidadNeta = recaudacionTotal - ivaTotal - comisionTotal
 
-  // 📄 Exportar CSV con Blob y UTF-8 BOM para que Excel separe bien las columnas
+  // 📄 Exportar CSV con Blob y UTF-8 BOM
   const exportarCSV = () => {
-    const headers = ['Empresa / Cliente', 'RUT', 'Tipo de Servicio', 'Frecuencia', 'Estado', 'Fecha', 'Recaudacion', 'IVA (19%)', 'Utilidad Neta']
+    const headers = ['Empresa / Cliente', 'RUT', 'Tipo de Servicio', 'Frecuencia', 'Estado', 'Fecha', 'Recaudacion', 'IVA (19%)', 'Comision Tarjeta', 'Utilidad Neta']
     
     const rows = datosFiltrados.map(r => {
       const iva = Math.round(r.recaudacion * 0.19)
-      const utilidad = r.recaudacion - iva
-      // Limpiamos comillas y caracteres raros en nombres
+      const utilidad = r.recaudacion - iva - r.comision
       const nombreLimpio = (r.nombre || '').replace(/[^\w\s]/gi, '').trim()
       const rutLimpio = (r.rut || '').trim()
       
@@ -128,12 +135,12 @@ export default function ReportesPage() {
         `"${r.fecha}"`,
         r.recaudacion,
         iva,
+        r.comision,
         utilidad
       ].join(',')
     })
 
     const csvContent = [headers.join(','), ...rows].join('\r\n')
-    // Agregamos \ufeff para que Excel reconozca los caracteres especiales (tildes) y las comas como columnas
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     
@@ -176,7 +183,6 @@ export default function ReportesPage() {
             ))}
           </select>
         </div>
-
         <div>
           <label className="block font-bold text-slate-700 mb-1">Mes</label>
           <select
@@ -189,7 +195,6 @@ export default function ReportesPage() {
             ))}
           </select>
         </div>
-
         <div>
           <label className="block font-bold text-slate-700 mb-1">Buscar cliente o empresa</label>
           <div className="relative">
@@ -206,7 +211,7 @@ export default function ReportesPage() {
       </section>
 
       {/* 📊 Tarjetas de Métricas unificadas */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <section className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         <article className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm space-y-1">
           <p className="text-xs font-semibold text-slate-400">Recaudación bruta total</p>
           <h3 className="text-xl font-black text-slate-900">${recaudacionTotal.toLocaleString('es-CL')}</h3>
@@ -216,8 +221,12 @@ export default function ReportesPage() {
           <h3 className="text-xl font-black text-slate-900">${ivaTotal.toLocaleString('es-CL')}</h3>
         </article>
         <article className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm space-y-1">
-          <p className="text-xs font-semibold text-slate-400">Utilidad neta</p>
-          <h3 className="text-xl font-black text-slate-900">${utilidadNeta.toLocaleString('es-CL')}</h3>
+          <p className="text-xs font-semibold text-slate-400">Comisión tarjeta total</p>
+          <h3 className="text-xl font-black text-amber-700">${comisionTotal.toLocaleString('es-CL')}</h3>
+        </article>
+        <article className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm space-y-1">
+          <p className="text-xs font-semibold text-slate-400">Utilidad neta real</p>
+          <h3 className="text-xl font-black text-emerald-700">${utilidadNeta.toLocaleString('es-CL')}</h3>
         </article>
       </section>
 
@@ -233,23 +242,26 @@ export default function ReportesPage() {
                 <th className="py-3.5 px-4">Fecha</th>
                 <th className="py-3.5 px-4 text-right">Recaudación</th>
                 <th className="py-3.5 px-4 text-right">IVA</th>
-                <th className="py-3.5 px-4 text-right">Utilidad</th>
+                <th className="py-3.5 px-4 text-right">Comisión</th>
+                <th className="py-3.5 px-4 text-right">Utilidad Real</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-8 text-slate-400 font-medium">Cargando ingresos unificados...</td>
+                  <td colSpan={8} className="text-center py-8 text-slate-400 font-medium">Cargando ingresos unificados...</td>
                 </tr>
               ) : datosFiltrados.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-8 text-slate-400 font-medium">No hay registros financieros para este periodo.</td>
+                  <td colSpan={8} className="text-center py-8 text-slate-400 font-medium">No hay registros financieros para este periodo.</td>
                 </tr>
               ) : (
                 datosFiltrados.map((item) => {
                   const monto = item.recaudacion
                   const ivaItem = Math.round(monto * 0.19)
-                  const utilidadItem = monto - ivaItem
+                  const comisionItem = item.comision
+                  const utilidadItem = monto - ivaItem - comisionItem
+                  
                   return (
                     <tr key={item.id} className="hover:bg-slate-50 transition">
                       <td className="py-3.5 px-6 font-bold text-slate-900">
@@ -267,6 +279,7 @@ export default function ReportesPage() {
                       <td className="py-3.5 px-4 text-slate-600">{item.fecha}</td>
                       <td className="py-3.5 px-4 text-right font-bold text-slate-900">${monto.toLocaleString('es-CL')}</td>
                       <td className="py-3.5 px-4 text-right text-slate-600">${ivaItem.toLocaleString('es-CL')}</td>
+                      <td className="py-3.5 px-4 text-right text-amber-700 font-semibold">${comisionItem.toLocaleString('es-CL')}</td>
                       <td className="py-3.5 px-4 text-right font-extrabold text-emerald-700">${utilidadItem.toLocaleString('es-CL')}</td>
                     </tr>
                   )
@@ -276,7 +289,6 @@ export default function ReportesPage() {
           </table>
         </div>
       </section>
-
     </div>
   )
 }

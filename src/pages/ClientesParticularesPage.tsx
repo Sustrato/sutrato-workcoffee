@@ -29,7 +29,12 @@ interface UsoOficina {
   modalidad: string
   horas_calculadas: number
   monto_total: number
+  monto_neto?: number
+  iva?: number
+  monto_liquido?: number
+  comision_tarjeta?: number
   estado_pago: string
+  forma_pago?: string
   voucher_url?: string
   bases_aceptadas?: boolean
   fecha_aceptacion_bases?: string
@@ -54,9 +59,9 @@ export default function ClientesParticularesPage() {
   const [editingClienteId, setEditingClienteId] = useState<string | null>(null)
   const [editingVisitaId, setEditingVisitaId] = useState<string | null>(null)
   
+  // Estados para los Modales de Eliminación Personalizados
   const [clienteAEliminar, setClienteAEliminar] = useState<ClienteParticular | null>(null)
   const [confirmacionTexto, setConfirmacionTexto] = useState('')
-
   const [visitaAEliminar, setVisitaAEliminar] = useState<UsoOficina | null>(null)
   const [confirmacionVisitaTexto, setConfirmacionVisitaTexto] = useState('')
   
@@ -82,6 +87,14 @@ export default function ClientesParticularesPage() {
   const [horasCalculadas, setHorasCalculadas] = useState(1)
   const [valorCalculado, setValorCalculado] = useState(3000)
   const [estadoPago, setEstadoPago] = useState('Pagado')
+  const [formaPago, setFormaPago] = useState('Transferencia')
+
+  // Estados Financieros (IVA, Neto, Líquido, Comisión Tarjeta)
+  const [montoLiquidoCustom, setMontoLiquidoCustom] = useState(3000)
+  
+  const netoCalculado = Math.round(valorCalculado / 1.19)
+  const ivaCalculado = valorCalculado - netoCalculado
+  const comisionTarjetaCalculada = Math.max(0, valorCalculado - montoLiquidoCustom)
   
   const [voucherFile, setVoucherFile] = useState<File | null>(null)
   const [voucherActualUrl, setVoucherActualUrl] = useState<string>('')
@@ -177,6 +190,7 @@ export default function ClientesParticularesPage() {
     setVoucherFile(null)
     setVoucherActualUrl('')
     setEstadoPago('Pagado')
+    setFormaPago('Transferencia')
   }
 
   const handleAbrirEditarCliente = (c: ClienteParticular) => {
@@ -212,24 +226,24 @@ export default function ClientesParticularesPage() {
     setHoraSalida(visita.hora_fin || '10:00')
     setModalidad(visita.modalidad || 'Por hora')
     setEstadoPago(visita.estado_pago || 'Pagado')
+    setFormaPago(visita.forma_pago || 'Transferencia')
+    setValorCalculado(visita.monto_total || 3000)
+    // Precargamos correctamente el monto líquido guardado o por defecto el monto total
+    setMontoLiquidoCustom(visita.monto_liquido ?? visita.monto_total ?? 3000)
     setBasesAceptadas(visita.bases_aceptadas ?? true)
     setVoucherActualUrl(visita.voucher_url || '')
     setVoucherFile(null)
   }
 
-  // Función para abrir vouchers privados de forma segura mediante URL firmada
   const handleVerVoucherSeguro = async (urlOriginal: string) => {
     if (!urlOriginal) return
     try {
       const partes = urlOriginal.split('/')
       const nombreArchivo = partes[partes.length - 1]
-
       const { data, error } = await supabase.storage
         .from('vouchers')
         .createSignedUrl(nombreArchivo, 60)
-
       if (error) throw error
-
       if (data?.signedUrl) {
         window.open(data.signedUrl, '_blank')
       }
@@ -282,7 +296,7 @@ export default function ClientesParticularesPage() {
   }, [isArriendoModalOpen, fechaIngreso, horaIngreso, horaSalida])
 
   useEffect(() => {
-    if (horaIngreso && horaSalida) {
+    if (horaIngreso && horaSalida && !editingVisitaId) {
       const [hIn, mIn] = horaIngreso.split(':').map(Number)
       const [hOut, mOut] = horaSalida.split(':').map(Number)
       const minInicio = hIn * 60 + mIn
@@ -292,18 +306,21 @@ export default function ClientesParticularesPage() {
       const horasDecimales = diffMinutos / 60
       setHorasCalculadas(Number(horasDecimales.toFixed(2)))
       
+      let calculado = 3000
       if (modalidad === 'Por hora') {
         const tarifaPorMinuto = 3000 / 60
-        setValorCalculado(Math.round(diffMinutos * tarifaPorMinuto))
+        calculado = Math.round(diffMinutos * tarifaPorMinuto)
       } else if (modalidad === 'Por día') {
-        setValorCalculado(20000)
+        calculado = 20000
       } else if (modalidad === 'Por semana') {
-        setValorCalculado(102000)
+        calculado = 102000
       } else if (modalidad === 'Mensual') {
-        setValorCalculado(350000)
+        calculado = 350000
       }
+      setValorCalculado(calculado)
+      setMontoLiquidoCustom(calculado)
     }
-  }, [horaIngreso, horaSalida, modalidad])
+  }, [horaIngreso, horaSalida, modalidad, editingVisitaId])
 
   const handleGuardarCliente = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -411,7 +428,12 @@ export default function ClientesParticularesPage() {
       modalidad,
       horas_calculadas: horasCalculadas,
       monto_total: Number(valorCalculado),
+      monto_neto: netoCalculado,
+      iva: ivaCalculado,
+      monto_liquido: montoLiquidoCustom,
+      comision_tarjeta: comisionTarjetaCalculada,
       estado_pago: estadoPago,
+      forma_pago: formaPago,
       bases_aceptadas: basesAceptadas,
       fecha_aceptacion_bases: fechaAceptacion,
       voucher_url: finalVoucherUrl || null
@@ -425,6 +447,7 @@ export default function ClientesParticularesPage() {
       const res = await supabase.from('uso_oficinas_particulares').insert([payloadArriendo])
       error = res.error
     }
+
     setUploadingVoucher(false)
     if (error) {
       alert('Error guardando el arriendo: ' + error.message)
@@ -623,7 +646,7 @@ export default function ClientesParticularesPage() {
         </table>
       </section>
 
-      {/* 📱 MODAL DE CÓDIGO QR */}
+      {/* MODAL DE CÓDIGO QR */}
       {isQrModalOpen && clienteQrSeleccionado && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl p-6 text-center space-y-4">
@@ -639,7 +662,7 @@ export default function ClientesParticularesPage() {
             </p>
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-center">
               <QRCodeSVG 
-                value={`https://forms.zohopublic.com/rotaryconcordia1/form/Aceptacionterminossutrato/formperma/dEiuFyNghAj8CFZhy7d5P7knBvun9DFBkH6HX0l2Bh4?zf_lang=en&Field_3=${encodeURIComponent(clienteQrSeleccionado.rut || '')}&Field_4=${encodeURIComponent(clienteQrSeleccionado.telefono || '')}&Field_5=${encodeURIComponent(clienteQrSeleccionado.correo || '')}&Field_6=${encodeURIComponent(clienteQrSeleccionado.nombre_completo || '')}&Field_7=${encodeURIComponent(clienteQrSeleccionado.rut_empresa || '')}`} 
+                value={`https://forms.zohopublic.com/rotaryconcordia1/form/Aceptacionterminossutrato/formperma/dEiuFyNghAj8CFZhy7d5P7knBvun9DFBkH6HX0l2Bh4?zf_lang=en&Field_1=${encodeURIComponent(clienteQrSeleccionado.nombre_completo || '')}&Field_3=${encodeURIComponent(clienteQrSeleccionado.rut || '')}&Field_4=${encodeURIComponent(clienteQrSeleccionado.telefono || '')}&Field_5=${encodeURIComponent(clienteQrSeleccionado.correo || '')}&Field_6=${encodeURIComponent(clienteQrSeleccionado.empresa || '')}&Field_7=${encodeURIComponent(clienteQrSeleccionado.rut_empresa || '')}`} 
                 size={180} 
               />
             </div>
@@ -659,7 +682,7 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* 🖤 MODAL 1: NUEVO / EDITAR CLIENTE PARTICULAR */}
+      {/* MODAL 1: NUEVO / EDITAR CLIENTE PARTICULAR */}
       {isClienteModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl">
@@ -719,33 +742,35 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* ⚠️ MODAL: ELIMINACIÓN DE CLIENTE */}
+      {/* 🛑 MODAL ESTILIZADO: ELIMINACIÓN DE CLIENTE */}
       {clienteAEliminar && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[999]">
-          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
-            <div className="bg-rose-600 text-white px-6 py-4 flex justify-between items-center">
-              <h3 className="font-bold text-base">Eliminar cliente particular</h3>
-              <button onClick={() => setClienteAEliminar(null)} className="text-white/80 hover:text-white">
+          <div className="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-rose-100">
+            <div className="bg-[#E11D48] text-white px-6 py-4 flex justify-between items-center">
+              <h3 className="font-bold text-base tracking-wide">Eliminar cliente particular</h3>
+              <button onClick={() => setClienteAEliminar(null)} className="text-white/80 hover:text-white transition">
                 <X size={20} />
               </button>
             </div>
             
-            <form onSubmit={handleConfirmarEliminarCliente} className="p-6 space-y-4 text-xs">
-              <p className="text-slate-700 font-medium">
+            <form onSubmit={handleConfirmarEliminarCliente} className="p-6 space-y-5 text-xs">
+              <p className="text-slate-800 text-sm font-medium">
                 ¿Estás seguro de que deseas eliminar a <strong>{clienteAEliminar.nombre_completo}</strong>?
               </p>
               
-              <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-rose-900 text-[11px] leading-relaxed">
-                Escribe <strong className="underline">ELIMINAR</strong> a continuación para confirmar que deseas borrar este registro definitivamente del sistema.
+              <div className="bg-rose-50 border border-rose-200 text-rose-900 p-4 rounded-xl space-y-1">
+                <p>
+                  Escribe <strong className="underline font-black">ELIMINAR</strong> a continuación para confirmar que deseas borrar este registro definitivamente del sistema.
+                </p>
               </div>
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Confirmación *</label>
+                <label className="block font-bold text-slate-700 mb-1.5">Confirmación *</label>
                 <input 
                   type="text" 
-                  placeholder="Escribe ELIMINAR"
+                  placeholder="ESCRIBE ELIMINAR"
                   value={confirmacionTexto}
                   onChange={(e) => setConfirmacionTexto(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none font-bold text-rose-600 uppercase"
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 text-xs font-bold uppercase placeholder:font-normal placeholder:text-rose-300 text-rose-600"
                   required
                 />
               </div>
@@ -753,14 +778,14 @@ export default function ClientesParticularesPage() {
                 <button 
                   type="button" 
                   onClick={() => setClienteAEliminar(null)} 
-                  className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700"
+                  className="px-5 py-2.5 border border-slate-300 rounded-xl font-bold text-slate-700 hover:bg-slate-50 transition text-xs"
                 >
                   Cancelar
                 </button>
                 <button 
                   type="submit" 
                   disabled={confirmacionTexto.trim() !== 'ELIMINAR'}
-                  className="bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white font-bold px-5 py-2 rounded-lg shadow transition"
+                  className="bg-[#FB7185] hover:bg-[#F43F5E] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold px-6 py-2.5 rounded-xl shadow transition text-xs"
                 >
                   Presiona ELIMINAR
                 </button>
@@ -770,33 +795,35 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* ⚠️ MODAL: ELIMINACIÓN DE VISITA / PAGO (Z-INDEX ALTO Y CENTRADO) */}
+      {/* 🛑 MODAL ESTILIZADO: ELIMINACIÓN DE VISITA / PAGO */}
       {visitaAEliminar && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[999]">
-          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
-            <div className="bg-rose-600 text-white px-6 py-4 flex justify-between items-center">
-              <h3 className="font-bold text-base">Eliminar registro de pago / visita</h3>
-              <button onClick={() => setVisitaAEliminar(null)} className="text-white/80 hover:text-white">
+          <div className="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-rose-100">
+            <div className="bg-[#E11D48] text-white px-6 py-4 flex justify-between items-center">
+              <h3 className="font-bold text-base tracking-wide">Eliminar registro de pago / visita</h3>
+              <button onClick={() => setVisitaAEliminar(null)} className="text-white/80 hover:text-white transition">
                 <X size={20} />
               </button>
             </div>
             
-            <form onSubmit={handleConfirmarEliminarVisita} className="p-6 space-y-4 text-xs">
-              <p className="text-slate-700 font-medium">
+            <form onSubmit={handleConfirmarEliminarVisita} className="p-6 space-y-5 text-xs">
+              <p className="text-slate-800 text-sm font-medium">
                 ¿Estás seguro de que deseas eliminar la visita del <strong>{visitaAEliminar.fecha_inicio}</strong> ({visitaAEliminar.oficina_asignada})?
               </p>
               
-              <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-rose-900 text-[11px] leading-relaxed">
-                Escribe <strong className="underline">ELIMINAR</strong> a continuación para confirmar el borrado definitivo de este pago.
+              <div className="bg-rose-50 border border-rose-200 text-rose-900 p-4 rounded-xl space-y-1">
+                <p>
+                  Escribe <strong className="underline font-black">ELIMINAR</strong> a continuación para confirmar el borrado definitivo de este pago.
+                </p>
               </div>
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Confirmación *</label>
+                <label className="block font-bold text-slate-700 mb-1.5">Confirmación *</label>
                 <input 
                   type="text" 
-                  placeholder="Escribe ELIMINAR"
+                  placeholder="ESCRIBE ELIMINAR"
                   value={confirmacionVisitaTexto}
                   onChange={(e) => setConfirmacionVisitaTexto(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none font-bold text-rose-600 uppercase"
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 text-xs font-bold uppercase placeholder:font-normal placeholder:text-rose-300 text-rose-600"
                   required
                 />
               </div>
@@ -804,14 +831,14 @@ export default function ClientesParticularesPage() {
                 <button 
                   type="button" 
                   onClick={() => setVisitaAEliminar(null)} 
-                  className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700"
+                  className="px-5 py-2.5 border border-slate-300 rounded-xl font-bold text-slate-700 hover:bg-slate-50 transition text-xs"
                 >
                   Cancelar
                 </button>
                 <button 
                   type="submit" 
                   disabled={confirmacionVisitaTexto.trim() !== 'ELIMINAR'}
-                  className="bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white font-bold px-5 py-2 rounded-lg shadow transition"
+                  className="bg-[#FB7185] hover:bg-[#F43F5E] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold px-6 py-2.5 rounded-xl shadow transition text-xs"
                 >
                   Presiona ELIMINAR
                 </button>
@@ -821,7 +848,7 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* 🖤 MODAL 2: REGISTRAR / EDITAR ARRIENDO CON HISTORIAL Y VOUCHER SEGURO */}
+      {/* 🖤 MODAL 2: REGISTRAR / EDITAR ARRIENDO CON HISTORIAL, VOUCHER Y CÁLCULO FINANCIERO */}
       {isArriendoModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -862,7 +889,6 @@ export default function ClientesParticularesPage() {
                     <strong className="text-[#C5A059]">{totalHorasAcumuladas.toFixed(1)} hrs</strong>
                   </div>
                 </div>
-
                 {historialVisitasCliente.length > 0 && (
                   <div className="space-y-1">
                     <p className="font-bold text-slate-600 text-[10px] uppercase tracking-wider">
@@ -882,7 +908,6 @@ export default function ClientesParticularesPage() {
                           </span>
                           
                           <div className="flex items-center gap-2">
-                            {/* BOTÓN VOUCHER SEGURO DIRECTO EN EL HISTORIAL */}
                             {visita.voucher_url ? (
                               <button 
                                 type="button"
@@ -895,7 +920,6 @@ export default function ClientesParticularesPage() {
                             ) : (
                               <span className="text-[10px] text-slate-400 italic">Sin voucher</span>
                             )}
-
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${visita.estado_pago === 'Pagado' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
                               {visita.estado_pago}
                             </span>
@@ -916,7 +940,6 @@ export default function ClientesParticularesPage() {
                     </div>
                   </div>
                 )}
-
                 {editingVisitaId && (
                   <div className="flex justify-between items-center bg-amber-100/70 border border-amber-300 p-2 rounded-lg text-[11px] text-amber-900">
                     <span>✏️ Estás editando una visita seleccionada del historial.</span>
@@ -926,9 +949,9 @@ export default function ClientesParticularesPage() {
                   </div>
                 )}
               </div>
-
+              
               {/* Formulario de la visita */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Oficina *</label>
                   <select 
@@ -957,12 +980,28 @@ export default function ClientesParticularesPage() {
                   </select>
                 </div>
                 <div>
+                  <label className="block font-bold text-slate-700 mb-1">Forma de pago</label>
+                  <select value={formaPago} onChange={(e) => setFormaPago(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white">
+                    <option value="Transferencia">Transferencia</option>
+                    <option value="Mercado Pago">Mercado Pago</option>
+                    <option value="Efectivo">Efectivo</option>
+                    <option value="Tarjeta de Débito/Crédito">Tarjeta de Débito/Crédito</option>
+                  </select>
+                </div>
+                <div>
                   <label className="block font-bold text-slate-700 mb-1">Fecha ingreso *</label>
                   <input type="date" value={fechaIngreso} onChange={(e) => setFechaIngreso(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Fecha término *</label>
                   <input type="date" value={fechaTermino} onChange={(e) => setFechaTermino(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Estado del pago</label>
+                  <select value={estadoPago} onChange={(e) => setEstadoPago(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white font-bold text-amber-700">
+                    <option value="Pagado">Pagado</option>
+                    <option value="Pendiente">Pendiente</option>
+                  </select>
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Hora de ingreso *</label>
@@ -977,20 +1016,41 @@ export default function ClientesParticularesPage() {
                   <input type="number" step="0.01" value={horasCalculadas} readOnly className="w-full px-3 py-2 border border-slate-200 bg-stone-100 rounded-lg focus:outline-none font-semibold text-slate-800" />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Valor ($)</label>
-                  <input type="number" value={valorCalculado} readOnly className="w-full px-3 py-2 border border-slate-200 bg-stone-100 rounded-lg font-extrabold text-slate-900" />
+                  <label className="block font-bold text-slate-700 mb-1">Monto Bruto ($)</label>
+                  <input type="number" value={valorCalculado} onChange={(e) => setValorCalculado(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-extrabold text-slate-900" />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Estado del pago</label>
-                  <select value={estadoPago} onChange={(e) => setEstadoPago(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white font-bold text-amber-700">
-                    <option value="Pagado">Pagado</option>
-                    <option value="Pendiente">Pendiente</option>
-                  </select>
+                  <label className="block font-bold text-slate-700 mb-1">Monto Líquido Recibido</label>
+                  <input type="number" value={montoLiquidoCustom} onChange={(e) => setMontoLiquidoCustom(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-emerald-700" />
                 </div>
               </div>
               
               <div className="text-[11px] text-slate-500 font-medium italic">
-                {horaIngreso} a {horaSalida} · {Math.round(horasCalculadas * 60)} minutos ({horasCalculadas} h) × ${modalidad === 'Por hora' ? '3.000 /h ($50/min)' : 'Tarifa fija'} = ${valorCalculado.toLocaleString('es-CL')}
+                {horaIngreso} a {horaSalida} · {Math.round(horasCalculadas * 60)} minutos ({horasCalculadas} h) = ${valorCalculado.toLocaleString('es-CL')}
+              </div>
+
+              {/* CAJA DE CÁLCULO FINANCIERO (IVA, NETO, LÍQUIDO, COMISIÓN) */}
+              <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
+                <div>
+                  <p className="text-[10px] font-semibold text-slate-500">Monto bruto</p>
+                  <p className="font-extrabold text-slate-900 text-sm mt-0.5">${valorCalculado.toLocaleString('es-CL')}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold text-slate-500">Neto calculado</p>
+                  <p className="font-bold text-slate-800 text-xs mt-0.5">${netoCalculado.toLocaleString('es-CL')}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold text-slate-500">IVA (19%)</p>
+                  <p className="font-bold text-blue-700 text-xs mt-0.5">${ivaCalculado.toLocaleString('es-CL')}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold text-slate-500">Líquido recibido</p>
+                  <p className="font-bold text-emerald-700 text-xs mt-0.5">${montoLiquidoCustom.toLocaleString('es-CL')}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold text-slate-500">Comisión tarjeta</p>
+                  <p className="font-bold text-amber-700 text-xs mt-0.5">${comisionTarjetaCalculada.toLocaleString('es-CL')}</p>
+                </div>
               </div>
 
               {/* SECCIÓN VOUCHER COMO ARCHIVO */}
@@ -1009,7 +1069,6 @@ export default function ClientesParticularesPage() {
                     </button>
                   </div>
                 )}
-
                 <div className="flex items-center gap-2 border border-slate-300 rounded-lg p-2 bg-white">
                   <Upload size={16} className="text-slate-400 shrink-0" />
                   <input 
