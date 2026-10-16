@@ -124,10 +124,10 @@ export default function CateringClientesPage() {
     })
   }
 
-  // Abrir modal para Editar cargando los datos del cliente
-  const handleAbrirEditarCliente = (clienteOriginal: Cliente, rawData: any) => {
+ 
+ // Abrir modal para Editar cargando los datos del cliente
+  const handleAbrirEditarCliente = (clienteOriginal: Cliente) => {
     setEditingClienteId(clienteOriginal.id)
-    // Buscamos los datos originales exactos de Supabase si es necesario, o mapeamos
     setNuevoCliente({
       tipo: clienteOriginal.tipo,
       nombre: clienteOriginal.nombre,
@@ -308,11 +308,11 @@ export default function CateringClientesPage() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleAbrirEditarCliente(cliente, null)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
-                        >
+                       <button
+  type="button"
+  onClick={() => handleAbrirEditarCliente(cliente)}
+  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1"
+>
                           <Edit size={14} /> Editar
                         </button>
                         <button
