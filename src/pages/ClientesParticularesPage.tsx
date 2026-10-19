@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
-import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink } from 'lucide-react'
+import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink, CheckCircle2, AlertCircle } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
 interface ClienteParticular {
@@ -50,6 +50,22 @@ export default function ClientesParticularesPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
   
+  // 🌟 Estado para notificaciones corporativas flotantes (Sustrato)
+  const [mensajeExito, setMensajeExito] = useState<string | null>(null)
+  const [mensajeError, setMensajeError] = useState<string | null>(null)
+  
+  const mostrarExito = (msg: string) => {
+    setMensajeExito(msg)
+    setMensajeError(null)
+    setTimeout(() => setMensajeExito(null), 4000) // Se oculta solo a los 4 segundos
+  }
+
+  const mostrarError = (msg: string) => {
+    setMensajeError(msg)
+    setMensajeExito(null)
+    setTimeout(() => setMensajeError(null), 5000)
+  }
+
   const [isClienteModalOpen, setIsClienteModalOpen] = useState(false)
   const [isArriendoModalOpen, setIsArriendoModalOpen] = useState(false)
   const [isQrModalOpen, setIsQrModalOpen] = useState(false)
@@ -88,8 +104,8 @@ export default function ClientesParticularesPage() {
   const [valorCalculado, setValorCalculado] = useState(3000)
   const [estadoPago, setEstadoPago] = useState('Pagado')
   const [formaPago, setFormaPago] = useState('Transferencia')
-
-  // Estados Financieros (IVA, Neto, Líquido, Comisión Tarjeta)
+  
+  // Estados Financieros
   const [montoLiquidoCustom, setMontoLiquidoCustom] = useState(3000)
   
   const netoCalculado = Math.round(valorCalculado / 1.19)
@@ -228,7 +244,6 @@ export default function ClientesParticularesPage() {
     setEstadoPago(visita.estado_pago || 'Pagado')
     setFormaPago(visita.forma_pago || 'Transferencia')
     setValorCalculado(visita.monto_total || 3000)
-    // Precargamos correctamente el monto líquido guardado o por defecto el monto total
     setMontoLiquidoCustom(visita.monto_liquido ?? visita.monto_total ?? 3000)
     setBasesAceptadas(visita.bases_aceptadas ?? true)
     setVoucherActualUrl(visita.voucher_url || '')
@@ -248,7 +263,7 @@ export default function ClientesParticularesPage() {
         window.open(data.signedUrl, '_blank')
       }
     } catch (err: any) {
-      alert('Error al abrir el voucher: ' + err.message)
+      mostrarError('Error al abrir el voucher: ' + err.message)
     }
   }
 
@@ -324,7 +339,10 @@ export default function ClientesParticularesPage() {
 
   const handleGuardarCliente = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!nombreCompleto || !rut || !telefono) return alert('Completa los campos obligatorios (*)')
+    if (!nombreCompleto || !rut || !telefono) {
+      mostrarError('Completa los campos obligatorios (*)')
+      return
+    }
     
     const payload = {
       nombre_completo: nombreCompleto,
@@ -346,44 +364,49 @@ export default function ClientesParticularesPage() {
       const res = await supabase.from('clientes_particulares').insert([payload])
       error = res.error
     }
+
     if (error) {
-      alert('Error guardando cliente: ' + error.message)
+      mostrarError('Error guardando cliente: ' + error.message)
     } else {
-      alert(editingClienteId ? '¡Cliente actualizado con éxito!' : '¡Cliente creado con éxito!')
+      mostrarExito(editingClienteId ? '¡Cliente actualizado con éxito en Sustrato!' : '¡Cliente creado con éxito en Sustrato!')
       setIsClienteModalOpen(false)
       resetFormularioCliente()
       fetchClientes()
     }
   }
 
+  // 🧹 Eliminación de cliente con alerta limpia Sustrato (Sin usar alert nativo de Vercel/localhost)
   const handleConfirmarEliminarCliente = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!clienteAEliminar) return
     if (confirmacionTexto.trim() !== 'ELIMINAR') {
-      return alert('Debes escribir la palabra exacta ELIMINAR para proceder.')
+      mostrarError('Debes escribir la palabra exacta ELIMINAR para proceder.')
+      return
     }
     const { error } = await supabase.from('clientes_particulares').delete().eq('id', clienteAEliminar.id)
     if (error) {
-      alert('Error al eliminar cliente: ' + error.message)
+      mostrarError('Error al eliminar cliente: ' + error.message)
     } else {
-      alert('Cliente eliminado definitivamente.')
+      mostrarExito('Cliente eliminado definitivamente del sistema.')
       setClienteAEliminar(null)
       setConfirmacionTexto('')
       fetchClientes()
     }
   }
 
+  // 🧹 Eliminación de visita con alerta limpia Sustrato
   const handleConfirmarEliminarVisita = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!visitaAEliminar) return
     if (confirmacionVisitaTexto.trim() !== 'ELIMINAR') {
-      return alert('Debes escribir la palabra exacta ELIMINAR para proceder con el borrado del pago.')
+      mostrarError('Debes escribir la palabra exacta ELIMINAR para proceder con el borrado del pago.')
+      return
     }
     const { error } = await supabase.from('uso_oficinas_particulares').delete().eq('id', visitaAEliminar.id)
     if (error) {
-      alert('Error al eliminar el registro: ' + error.message)
+      mostrarError('Error al eliminar el registro: ' + error.message)
     } else {
-      alert('Registro de visita/pago eliminado definitivamente.')
+      mostrarExito('Registro de visita y pago eliminado correctamente.')
       setVisitaAEliminar(null)
       setConfirmacionVisitaTexto('')
       fetchHistorialVisitas(clienteSeleccionadoId)
@@ -393,10 +416,12 @@ export default function ClientesParticularesPage() {
   const handleGuardarArriendo = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!basesAceptadas) {
-      return alert('Debes aceptar las Bases y Condiciones de uso físico para guardar el arriendo.')
+      mostrarError('Debes aceptar las Bases y Condiciones de uso físico para guardar el arriendo.')
+      return
     }
     if (oficinasBloqueadas.includes(oficina)) {
-      return alert(`La ${oficina} no está disponible en este horario (${detallesBloqueo[oficina]}).`)
+      mostrarError(`La ${oficina} no está disponible en este horario (${detallesBloqueo[oficina]}).`)
+      return
     }
     setUploadingVoucher(true)
     let finalVoucherUrl = voucherActualUrl
@@ -410,7 +435,8 @@ export default function ClientesParticularesPage() {
         .upload(filePath, voucherFile)
       if (uploadError) {
         setUploadingVoucher(false)
-        return alert('Error al subir el archivo de voucher: ' + uploadError.message)
+        mostrarError('Error al subir el archivo de voucher: ' + uploadError.message)
+        return
       }
       const { data: publicURLData } = supabase.storage
         .from('vouchers')
@@ -450,9 +476,9 @@ export default function ClientesParticularesPage() {
 
     setUploadingVoucher(false)
     if (error) {
-      alert('Error guardando el arriendo: ' + error.message)
+      mostrarError('Error guardando el arriendo: ' + error.message)
     } else {
-      alert(editingVisitaId ? '¡Visita actualizada con éxito!' : '¡Nueva visita/arriendo registrado y acumulado con éxito!')
+      mostrarExito(editingVisitaId ? '¡Visita actualizada con éxito!' : '¡Nueva visita y pago registrado con éxito!')
       setIsArriendoModalOpen(false)
       resetFormularioArriendo()
       fetchHistorialVisitas(clienteSeleccionadoId)
@@ -464,20 +490,41 @@ export default function ClientesParticularesPage() {
     const nombreMatch = c.nombre_completo?.toLowerCase().includes(searchTerm.toLowerCase()) || false
     const empresaMatch = c.empresa?.toLowerCase().includes(searchTerm.toLowerCase()) || false
     const correoMatch = c.correo?.toLowerCase().includes(searchTerm.toLowerCase()) || false
-    
     const rutClienteLimpio = normalizarRut(c.rut || '')
     const rutEmpresaLimpio = normalizarRut(c.rut_empresa || '')
-    
     const rutMatch = queryLimpio ? (rutClienteLimpio.includes(queryLimpio) || rutEmpresaLimpio.includes(queryLimpio)) : false
-    
     return nombreMatch || empresaMatch || correoMatch || rutMatch
   })
 
   const totalHorasAcumuladas = historialVisitasCliente.reduce((acc, curr) => acc + (Number(curr.horas_calculadas) || 0), 0)
 
   return (
-    <div className="mx-auto max-w-7xl space-y-7 font-sans">
+    <div className="mx-auto max-w-7xl space-y-7 font-sans relative">
       
+      {/* 🌟 SISTEMA DE NOTIFICACIONES FLOTANTES (Estilo Sustrato Pro) */}
+      {(mensajeExito || mensajeError) && (
+        <div className="fixed top-6 right-6 z-[9999] max-w-md animate-bounce-short">
+          {mensajeExito && (
+            <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-900 text-emerald-50 px-5 py-4 shadow-2xl backdrop-blur-md">
+              <CheckCircle2 size={22} className="text-emerald-400 shrink-0" />
+              <div className="text-xs font-semibold leading-relaxed">{mensajeExito}</div>
+              <button onClick={() => setMensajeExito(null)} className="ml-auto text-emerald-300 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+          )}
+          {mensajeError && (
+            <div className="flex items-center gap-3 rounded-2xl border border-rose-200 bg-rose-950 text-rose-50 px-5 py-4 shadow-2xl backdrop-blur-md">
+              <AlertCircle size={22} className="text-rose-400 shrink-0" />
+              <div className="text-xs font-semibold leading-relaxed">{mensajeError}</div>
+              <button onClick={() => setMensajeError(null)} className="ml-auto text-rose-300 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Encabezado */}
       <section className="flex justify-between items-center">
         <div>
@@ -536,7 +583,7 @@ export default function ClientesParticularesPage() {
           <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
           <input 
             type="text" 
-            placeholder="Buscar por nombre, RUT (con/sin guion/puntos), empresa o correo"
+            placeholder="Buscar por nombre, RUT, empresa o correo"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#C5A059]"
@@ -591,7 +638,6 @@ export default function ClientesParticularesPage() {
                       }`}>
                         {c.terminos_aceptados ? '• Aceptado' : '• Pendiente'}
                       </span>
-                      
                       <button
                         type="button"
                         onClick={() => handleAbrirQr(c)}
@@ -646,7 +692,7 @@ export default function ClientesParticularesPage() {
         </table>
       </section>
 
-      {/* MODAL DE CÓDIGO QR */}
+      {/* MODAL QR */}
       {isQrModalOpen && clienteQrSeleccionado && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl p-6 text-center space-y-4">
@@ -656,7 +702,6 @@ export default function ClientesParticularesPage() {
                 <X size={20} />
               </button>
             </div>
-            
             <p className="text-xs text-slate-500">
               Escanea el código para precargar los datos de <strong>{clienteQrSeleccionado.nombre_completo}</strong> en el formulario de Zoho.
             </p>
@@ -668,21 +713,19 @@ export default function ClientesParticularesPage() {
             </div>
             <div className="text-left bg-blue-50/60 p-3 rounded-lg text-[11px] text-slate-700 space-y-1">
               <p><strong>Cliente:</strong> {clienteQrSeleccionado.nombre_completo} ({clienteQrSeleccionado.rut})</p>
-              <p><strong>Estado actual:</strong> <span className={clienteQrSeleccionado?.terminos_aceptados ? 'text-emerald-700 font-bold' : 'text-amber-700 font-bold'}>{clienteQrSeleccionado?.terminos_aceptados ? 'Aceptado' : 'Pendiente de lectura y envío'}</span></p>
+              <p><strong>Estado:</strong> <span className={clienteQrSeleccionado?.terminos_aceptados ? 'text-emerald-700 font-bold' : 'text-amber-700 font-bold'}>{clienteQrSeleccionado?.terminos_aceptados ? 'Aceptado' : 'Pendiente'}</span></p>
             </div>
-            <div className="space-y-2 pt-2">
-              <button 
-                onClick={() => setIsQrModalOpen(false)}
-                className="w-full bg-[#181818] text-[#C5A059] font-bold py-2 rounded-lg text-xs hover:bg-black transition"
-              >
-                Cerrar
-              </button>
-            </div>
+            <button 
+              onClick={() => setIsQrModalOpen(false)}
+              className="w-full bg-[#181818] text-[#C5A059] font-bold py-2 rounded-lg text-xs hover:bg-black transition"
+            >
+              Cerrar
+            </button>
           </div>
         </div>
       )}
 
-      {/* MODAL 1: NUEVO / EDITAR CLIENTE PARTICULAR */}
+      {/* MODAL NUEVO / EDITAR CLIENTE */}
       {isClienteModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl">
@@ -742,7 +785,7 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* 🛑 MODAL ESTILIZADO: ELIMINACIÓN DE CLIENTE */}
+      {/* MODAL ELIMINACIÓN CLIENTE */}
       {clienteAEliminar && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-rose-100">
@@ -752,15 +795,13 @@ export default function ClientesParticularesPage() {
                 <X size={20} />
               </button>
             </div>
-            
             <form onSubmit={handleConfirmarEliminarCliente} className="p-6 space-y-5 text-xs">
               <p className="text-slate-800 text-sm font-medium">
                 ¿Estás seguro de que deseas eliminar a <strong>{clienteAEliminar.nombre_completo}</strong>?
               </p>
-              
               <div className="bg-rose-50 border border-rose-200 text-rose-900 p-4 rounded-xl space-y-1">
                 <p>
-                  Escribe <strong className="underline font-black">ELIMINAR</strong> a continuación para confirmar que deseas borrar este registro definitivamente del sistema.
+                  Escribe <strong className="underline font-black">ELIMINAR</strong> a continuación para confirmar el borrado definitivo.
                 </p>
               </div>
               <div>
@@ -795,7 +836,7 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* 🛑 MODAL ESTILIZADO: ELIMINACIÓN DE VISITA / PAGO */}
+      {/* MODAL ELIMINACIÓN VISITA / PAGO */}
       {visitaAEliminar && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[999]">
           <div className="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-rose-100">
@@ -805,15 +846,13 @@ export default function ClientesParticularesPage() {
                 <X size={20} />
               </button>
             </div>
-            
             <form onSubmit={handleConfirmarEliminarVisita} className="p-6 space-y-5 text-xs">
               <p className="text-slate-800 text-sm font-medium">
                 ¿Estás seguro de que deseas eliminar la visita del <strong>{visitaAEliminar.fecha_inicio}</strong> ({visitaAEliminar.oficina_asignada})?
               </p>
-              
               <div className="bg-rose-50 border border-rose-200 text-rose-900 p-4 rounded-xl space-y-1">
                 <p>
-                  Escribe <strong className="underline font-black">ELIMINAR</strong> a continuación para confirmar el borrado definitivo de este pago.
+                  Escribe <strong className="underline font-black">ELIMINAR</strong> para confirmar el borrado definitivo de este pago.
                 </p>
               </div>
               <div>
@@ -848,7 +887,7 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* 🖤 MODAL 2: REGISTRAR / EDITAR ARRIENDO CON HISTORIAL, VOUCHER Y CÁLCULO FINANCIERO */}
+      {/* MODAL REGISTRAR / EDITAR ARRIENDO */}
       {isArriendoModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -862,8 +901,6 @@ export default function ClientesParticularesPage() {
             </div>
             
             <form onSubmit={handleGuardarArriendo} className="p-6 space-y-5 text-xs">
-              
-              {/* Selector de Cliente y Resumen de Visitas Acumuladas */}
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Cliente particular *</label>
@@ -889,6 +926,7 @@ export default function ClientesParticularesPage() {
                     <strong className="text-[#C5A059]">{totalHorasAcumuladas.toFixed(1)} hrs</strong>
                   </div>
                 </div>
+
                 {historialVisitasCliente.length > 0 && (
                   <div className="space-y-1">
                     <p className="font-bold text-slate-600 text-[10px] uppercase tracking-wider">
@@ -906,14 +944,12 @@ export default function ClientesParticularesPage() {
                           >
                             📅 {visita.fecha_inicio} ({visita.hora_inicio} - {visita.hora_fin}) — <strong className="text-slate-700">{visita.oficina_asignada} [{visita.horas_calculadas}h]</strong>
                           </span>
-                          
                           <div className="flex items-center gap-2">
                             {visita.voucher_url ? (
                               <button 
                                 type="button"
                                 onClick={() => handleVerVoucherSeguro(visita.voucher_url!)}
                                 className="inline-flex items-center gap-1 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 px-2 py-1 rounded text-[10px] font-bold transition"
-                                title="Ver comprobante/voucher"
                               >
                                 <ExternalLink size={11} /> Voucher
                               </button>
@@ -930,7 +966,6 @@ export default function ClientesParticularesPage() {
                                 setConfirmacionVisitaTexto('')
                               }}
                               className="text-rose-500 hover:text-rose-700 p-1.5 border border-rose-200 rounded-lg hover:bg-rose-50 transition"
-                              title="Eliminar este pago/visita"
                             >
                               <Trash2 size={13} />
                             </button>
@@ -950,7 +985,6 @@ export default function ClientesParticularesPage() {
                 )}
               </div>
               
-              {/* Formulario de la visita */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Oficina *</label>
@@ -1024,12 +1058,8 @@ export default function ClientesParticularesPage() {
                   <input type="number" value={montoLiquidoCustom} onChange={(e) => setMontoLiquidoCustom(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-emerald-700" />
                 </div>
               </div>
-              
-              <div className="text-[11px] text-slate-500 font-medium italic">
-                {horaIngreso} a {horaSalida} · {Math.round(horasCalculadas * 60)} minutos ({horasCalculadas} h) = ${valorCalculado.toLocaleString('es-CL')}
-              </div>
 
-              {/* CAJA DE CÁLCULO FINANCIERO (IVA, NETO, LÍQUIDO, COMISIÓN) */}
+              {/* CAJA DE CÁLCULO FINANCIERO */}
               <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
                 <div>
                   <p className="text-[10px] font-semibold text-slate-500">Monto bruto</p>
@@ -1053,18 +1083,13 @@ export default function ClientesParticularesPage() {
                 </div>
               </div>
 
-              {/* SECCIÓN VOUCHER COMO ARCHIVO */}
+              {/* VOUCHER */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Comprobante de pago / Voucher (Archivo)</label>
-                
                 {voucherActualUrl && !voucherFile && (
                   <div className="mb-2 flex items-center justify-between bg-emerald-50 border border-emerald-200 p-2 rounded-lg text-[11px]">
                     <span className="text-emerald-800 font-medium truncate max-w-xs">📎 Voucher guardado actual</span>
-                    <button 
-                      type="button" 
-                      onClick={() => handleVerVoucherSeguro(voucherActualUrl)} 
-                      className="text-emerald-700 font-bold underline hover:text-emerald-900"
-                    >
+                    <button type="button" onClick={() => handleVerVoucherSeguro(voucherActualUrl)} className="text-emerald-700 font-bold underline">
                       Ver archivo actual
                     </button>
                   </div>
@@ -1082,14 +1107,9 @@ export default function ClientesParticularesPage() {
                     className="w-full text-xs text-slate-500 file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-bold file:bg-[#C5A059] file:text-slate-950 hover:file:bg-[#b59049]" 
                   />
                 </div>
-                {voucherFile && (
-                  <p className="mt-1 text-[11px] text-emerald-600 font-medium">
-                    Nuevo archivo seleccionado: {voucherFile.name}
-                  </p>
-                )}
               </div>
 
-              {/* SECCIÓN QR SOHO Y BASES DE USO FÍSICO */}
+              {/* BASES Y CONDICIONES */}
               <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-4 space-y-3">
                 <div className="flex justify-between items-center">
                   <h4 className="font-bold text-slate-900 flex items-center gap-2">
@@ -1097,9 +1117,6 @@ export default function ClientesParticularesPage() {
                   </h4>
                   <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded font-bold">Escaneo QR</span>
                 </div>
-                <p className="text-slate-600 text-[11px]">
-                  El cliente puede escanear el código QR vinculado de Soho para visualizar las bases y condiciones vigentes del espacio de trabajo.
-                </p>
                 <div className="flex items-center gap-2 pt-1">
                   <input type="checkbox" id="bases" checked={basesAceptadas} onChange={(e) => setBasesAceptadas(e.target.checked)} className="rounded text-[#C5A059] focus:ring-[#C5A059]" />
                   <label htmlFor="bases" className="font-bold text-slate-800">Aceptado por el cliente</label>
