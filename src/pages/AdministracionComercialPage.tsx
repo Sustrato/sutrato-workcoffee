@@ -1,17 +1,45 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { Plus, X, Trash2, CreditCard, ExternalLink, Search, FileText, Edit2, Download, QrCode } from 'lucide-react'
+import { Plus, X, Trash2, CreditCard, ExternalLink, Search, FileText, Edit2, Download, QrCode, CheckCircle2, AlertCircle } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
-// Nombre del bucket exacto
 const BUCKET_NAME = 'documentos_oficinas'
 
-// Función para eliminar puntos, guiones y espacios de cualquier RUT
+// Función para eliminar puntos, guiones y espacios
 const normalizarRut = (valor: string) => {
   if (!valor) return ''
   return valor.toLowerCase().replace(/[\.\-\s]/g, '')
 }
+
+// 📌 Validador real de RUT chileno (Módulo 11)
+const validarRutChileno = (rutCompleto: string) => {
+  if (!rutCompleto) return false;
+  const valor = rutCompleto.replace(/\./g, '').trim();
+  if (!valor.includes('-')) return false;
+  
+  const partes = valor.split('-');
+  if (partes.length !== 2) return false;
+  
+  let cuerpo = partes[0];
+  let dv = partes[1].toLowerCase();
+  
+  if (!/^\d+$/.test(cuerpo)) return false;
+  if (cuerpo.length < 7 || cuerpo.length > 8) return false;
+
+  let suma = 0;
+  let multiplo = 2;
+
+  for (let i = cuerpo.length - 1; i >= 0; i--) {
+    suma += parseInt(cuerpo.charAt(i)) * multiplo;
+    multiplo = multiplo < 7 ? multiplo + 1 : 2;
+  }
+
+  let dvEsperado = 11 - (suma % 11);
+  let dvCalculado = dvEsperado === 11 ? '0' : dvEsperado === 10 ? 'k' : dvEsperado.toString();
+
+  return dvCalculado === dv;
+};
 
 export default function AdministracionComercialPage() {
   const navigate = useNavigate()
@@ -25,22 +53,32 @@ export default function AdministracionComercialPage() {
   const [isQrModalOpen, setIsQrModalOpen] = useState(false)
   const [empresaQrSeleccionada, setEmpresaQrSeleccionada] = useState<any>(null)
   
-  // Estado para el Modal de Eliminación Personalizado tipo Imagen
+  // Modal de Eliminación Estilizado
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [empresaAEliminar, setEmpresaAEliminar] = useState<any>(null)
   const [textoConfirmacion, setTextoConfirmacion] = useState('')
 
-  // Estado para saber si estamos Creando o Editando Empresa
+  // Sistema de Notificaciones Flotantes (Toast) profesional en lugar de alert()
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+
+  const mostrarToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type })
+    setTimeout(() => {
+      setToast(null)
+    }, 4000)
+  }
+
+  // Estados de Edición y Doble Click
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [savingEmpresa, setSavingEmpresa] = useState(false)
   
-  // Empresa seleccionada para el modal de pagos y estado de Edición de Pago
   const [empresaSeleccionada, setEmpresaSeleccionada] = useState<any>(null)
   const [historialPagos, setHistorialPagos] = useState<any[]>([])
   const [loadingPagos, setLoadingPagos] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [editingPagoId, setEditingPagoId] = useState<string | null>(null)
 
-  // Formulario "Nueva empresa / Editar empresa"
+  // Formulario Empresa
   const [empresa, setEmpresa] = useState('')
   const [rutEmpresa, setRutEmpresa] = useState('')
   const [representanteLegal, setRepresentanteLegal] = useState('')
@@ -54,25 +92,20 @@ export default function AdministracionComercialPage() {
   const [montoMensual, setMontoMensual] = useState('350000')
   const [vigencia, setVigencia] = useState('VIGENTE')
 
-  // Formulario "Registrar / Editar pago"
+  // Formulario Pago
   const [fechaPago, setFechaPago] = useState(new Date().toISOString().split('T')[0])
   const [formaPago, setFormaPago] = useState('Transferencia')
   const [montoBruto, setMontoBruto] = useState(350000)
   const [montoLiquido, setMontoLiquido] = useState(350000)
   const [proximoPago, setProximoPago] = useState('')
-  
-  // Archivo único para comprobante de pago
   const [comprobanteFile, setComprobanteFile] = useState<File | null>(null)
   
-  // Lista base de oficinas privadas
   const listaOficinas = ['Oficina 1', 'Oficina 2', 'Oficina 3', 'Oficina 4', 'Oficina 5', 'Oficina 6', 'Oficina 7']
   
-  // Detectar oficinas ocupadas por contratos activos (excluyendo la empresa que se está editando)
   const oficinasOcupadas = arriendos
     .filter(a => a.estado === 'Activo' && a.id !== editingId)
     .map(a => a.tipo_espacio)
 
-  // Cálculos matemáticos solicitados
   const netoCalculado = Math.round(montoBruto / 1.19)
   const ivaCalculado = montoBruto - netoCalculado
   const comisionTarjetaCalculada = Math.max(0, montoBruto - montoLiquido)
@@ -91,7 +124,6 @@ export default function AdministracionComercialPage() {
     fetchArriendos()
   }, [])
 
-  // Limpiar formulario de empresa
   const resetFormularioEmpresa = () => {
     setEditingId(null)
     setEmpresa('')
@@ -109,7 +141,6 @@ export default function AdministracionComercialPage() {
     if (primeraDisponible) setTipoEspacio(primeraDisponible)
   }
 
-  // Cargar datos para EDITAR Empresa
   const handleAbrirEditar = (a: any) => {
     setEditingId(a.id)
     setEmpresa(a.nombre_cliente || '')
@@ -127,7 +158,6 @@ export default function AdministracionComercialPage() {
     setIsModalOpen(true)
   }
 
-  // Cargar datos para EDITAR un Pago del historial
   const handleSeleccionarPagoParaEditar = (pago: any) => {
     setEditingPagoId(pago.id)
     setFechaPago(pago.fecha_pago || new Date().toISOString().split('T')[0])
@@ -148,10 +178,9 @@ export default function AdministracionComercialPage() {
     }
   }
 
-  // Ver el Payload de Zoho
   const handleVerZohoPayload = (empresaItem: any) => {
     if (!empresaItem.zoho_payload) {
-      alert("Este cliente aún no ha enviado el formulario de Zoho.")
+      mostrarToast("Este cliente aún no ha enviado el formulario de Zoho.", "error")
       return
     }
     const jsonString = JSON.stringify(empresaItem.zoho_payload, null, 2)
@@ -160,36 +189,32 @@ export default function AdministracionComercialPage() {
     window.open(url, '_blank')
   }
 
-  // Abrir Modal QR
   const handleAbrirQr = (empresaItem: any) => {
     setEmpresaQrSeleccionada(empresaItem)
     setIsQrModalOpen(true)
   }
 
-  // Abrir Modal de Eliminación Personalizado
   const handleAbrirModalEliminar = (empresaItem: any) => {
     setEmpresaAEliminar(empresaItem)
     setTextoConfirmacion('')
     setIsDeleteModalOpen(true)
   }
 
-  // Ejecutar Eliminación Definitiva desde el Modal Estilizado
   const handleConfirmarEliminar = async () => {
     if (textoConfirmacion !== 'ELIMINAR') {
-      return alert('Debes escribir "ELIMINAR" en mayúsculas para confirmar.')
+      return mostrarToast('Debes escribir "ELIMINAR" en mayúsculas para confirmar.', 'error')
     }
     const { error } = await supabase.from('oficinas_fisicas').delete().eq('id', empresaAEliminar.id)
     if (!error) {
-      alert('Empresa eliminada de manera definitiva.')
+      mostrarToast('Empresa eliminada de manera definitiva.')
       setIsDeleteModalOpen(false)
       setEmpresaAEliminar(null)
       fetchArriendos()
     } else {
-      alert('Error al eliminar empresa: ' + error.message)
+      mostrarToast('Error al eliminar empresa: ' + error.message, 'error')
     }
   }
 
-  // Auto-calcular fecha del próximo pago según frecuencia
   useEffect(() => {
     if (fechaPago && !editingPagoId) {
       const d = new Date(fechaPago)
@@ -202,7 +227,6 @@ export default function AdministracionComercialPage() {
     }
   }, [fechaPago, frecuencia, editingPagoId])
 
-  // Cargar el historial de pagos de la empresa seleccionada
   const fetchHistorialPagos = async (empresaId: string) => {
     setLoadingPagos(true)
     const { data } = await supabase
@@ -225,7 +249,6 @@ export default function AdministracionComercialPage() {
     fetchHistorialPagos(empresaItem.id)
   }
 
-  // Abrir o Generar Contrato seguro
   const handleAbrirContrato = async (empresaItem: any) => {
     if (empresaItem.contrato_url) {
       window.open(empresaItem.contrato_url, '_blank')
@@ -244,7 +267,6 @@ export default function AdministracionComercialPage() {
     }
   }
 
-  // Subir archivo asegurando la ruta correcta dentro de la carpeta 'comprobantes'
   const uploadFile = async (file: File) => {
     try {
       const fileExt = file.name.split('.').pop()
@@ -255,8 +277,7 @@ export default function AdministracionComercialPage() {
         .upload(fileName, file, { upsert: true })
       
       if (error) {
-        console.error('Error subiendo archivo:', error)
-        alert('Error al subir el comprobante: ' + error.message)
+        mostrarToast('Error al subir el comprobante: ' + error.message, 'error')
         return null
       }
       
@@ -266,32 +287,56 @@ export default function AdministracionComercialPage() {
         
       return data?.publicUrl || null
     } catch (err: any) {
-      console.error('Excepción al subir archivo:', err)
       return null
     }
   }
 
-  // Guardar (Crear o Editar Empresa)
+  // 📌 Guardar con validaciones estrictas y protección contra doble click
   const handleGuardarEmpresa = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!empresa || !rutEmpresa) return alert('Completa los campos obligatorios (*)')
-    if (oficinasOcupadas.includes(tipoEspacio)) {
-      return alert(`La ${tipoEspacio} ya se encuentra ocupada por un contrato activo.`)
+    if (savingEmpresa) return // Bloqueo anti doble clic
+
+    // Validaciones básicas de campos obligatorios
+    if (!empresa.trim() || !rutEmpresa.trim()) {
+      return mostrarToast('Completa los campos obligatorios (*)', 'error')
     }
+
+    // 📌 Validar formato y validez del RUT empresa
+    if (!validarRutChileno(rutEmpresa)) {
+      return mostrarToast('El RUT de la empresa no es válido (Ej: 76123456-7)', 'error')
+    }
+
+    // 📌 Si ingresaron RUT representante, validarlo también
+    if (rutRepresentante.trim() && !validarRutChileno(rutRepresentante)) {
+      return mostrarToast('El RUT del representante legal no es válido (Ej: 12345678-9)', 'error')
+    }
+
+    // 📌 Validar Correo si fue ingresado
+    if (correo.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+      return mostrarToast('El formato del correo electrónico no es válido', 'error')
+    }
+
+    if (oficinasOcupadas.includes(tipoEspacio)) {
+      return mostrarToast(`La ${tipoEspacio} ya se encuentra ocupada por un contrato activo.`, 'error')
+    }
+
+    setSavingEmpresa(true)
+
     const payload = {
-      nombre_cliente: empresa,
+      nombre_cliente: empresa.trim(),
       rut_empresa: normalizarRut(rutEmpresa),
-      representante_legal: representanteLegal,
+      representante_legal: representanteLegal.trim(),
       rut_representante: normalizarRut(rutRepresentante),
-      telefono,
-      correo,
-      observaciones,
+      telefono: telefono.trim(),
+      correo: correo.trim(),
+      observaciones: observaciones.trim(),
       tipo_espacio: tipoEspacio,
       fecha_inicio: fechaInicio,
       frecuencia,
       monto_mensual: Number(montoMensual) || 0,
       vigencia,
     }
+
     let error;
     if (editingId) {
       const res = await supabase
@@ -310,17 +355,19 @@ export default function AdministracionComercialPage() {
         }])
       error = res.error
     }
+
+    setSavingEmpresa(false)
+
     if (!error) {
-      alert(editingId ? '¡Empresa actualizada con éxito!' : '¡Empresa guardada con éxito!')
+      mostrarToast(editingId ? '¡Empresa actualizada con éxito!' : '¡Empresa guardada con éxito!')
       setIsModalOpen(false)
       resetFormularioEmpresa()
       fetchArriendos()
     } else {
-      alert('Error al guardar la empresa: ' + error.message)
+      mostrarToast('Error al guardar la empresa: ' + error.message, 'error')
     }
   }
 
-  // Registrar o Actualizar Pago de arriendo
   const handleGuardarPago = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!empresaSeleccionada) return
@@ -383,12 +430,12 @@ export default function AdministracionComercialPage() {
 
     setUploading(false)
     if (!errPago && !errEmpresa) {
-      alert(editingPagoId ? '¡Pago actualizado con éxito!' : '¡Pago registrado con éxito!')
+      mostrarToast(editingPagoId ? '¡Pago actualizado con éxito!' : '¡Pago registrado con éxito!')
       resetFormularioPago()
       fetchHistorialPagos(empresaSeleccionada.id)
       fetchArriendos()
     } else {
-      alert('Error guardando el pago: ' + (errPago?.message || errEmpresa?.message))
+      mostrarToast('Error guardando el pago: ' + (errPago?.message || errEmpresa?.message), 'error')
     }
   }
 
@@ -402,11 +449,10 @@ export default function AdministracionComercialPage() {
       fetchHistorialPagos(empresaSeleccionada.id)
       fetchArriendos()
     } else {
-      alert('Error al eliminar el pago: ' + error.message)
+      mostrarToast('Error al eliminar el pago: ' + error.message, 'error')
     }
   }
 
-  // Búsqueda flexible ignorando puntos, guiones y espacios en los RUTs
   const queryLimpio = normalizarRut(searchTerm)
   const arriendosFiltrados = arriendos.filter(a => {
     const nombreMatch = a.nombre_cliente?.toLowerCase().includes(searchTerm.toLowerCase()) || false
@@ -417,8 +463,20 @@ export default function AdministracionComercialPage() {
   })
 
   return (
-    <div className="mx-auto max-w-7xl space-y-7 font-sans">
+    <div className="mx-auto max-w-7xl space-y-7 font-sans relative">
       
+      {/* 📌 Sistema de Notificación Flotante (Toast) */}
+      {toast && (
+        <div className={`fixed top-5 right-5 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl text-xs font-bold border transition-all ${
+          toast.type === 'success' 
+            ? 'bg-[#181818] text-[#C5A059] border-[#C5A059]' 
+            : 'bg-rose-950 text-rose-200 border-rose-500'
+        }`}>
+          {toast.type === 'success' ? <CheckCircle2 size={18} className="text-[#C5A059]" /> : <AlertCircle size={18} className="text-rose-400" />}
+          <span>{toast.message}</span>
+        </div>
+      )}
+
       {/* Encabezado */}
       <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -566,32 +624,25 @@ export default function AdministracionComercialPage() {
         </table>
       </section>
 
-      {/* 🛑 MODAL DE ELIMINACIÓN ESTILIZADO (TIPO IMAGEN) */}
+      {/* Modal de Eliminación Estilizado */}
       {isDeleteModalOpen && empresaAEliminar && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-rose-100">
-            
-            {/* Cabecera Rosa */}
-            <div className="bg-[#E11D48] text-white px-6 py-4 flex justify-between items-center">
-              <h3 className="font-bold text-base tracking-wide">Eliminar empresa comercial</h3>
-              <button onClick={() => setIsDeleteModalOpen(false)} className="text-white/80 hover:text-white transition">
+          <div className="bg-white rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-100">
+            <div className="bg-[#181818] text-[#C5A059] px-6 py-4 flex justify-between items-center border-b border-[#C5A059]/20">
+              <h3 className="font-bold text-sm tracking-wide">Eliminar empresa comercial</h3>
+              <button onClick={() => setIsDeleteModalOpen(false)} className="text-neutral-400 hover:text-white transition">
                 <X size={20} />
               </button>
             </div>
-
             <div className="p-6 space-y-5 text-xs">
               <p className="text-slate-800 text-sm font-medium">
                 ¿Estás seguro de que deseas eliminar a <strong>{empresaAEliminar.nombre_cliente}</strong>?
               </p>
-
-              {/* Caja de advertencia */}
               <div className="bg-rose-50 border border-rose-200 text-rose-900 p-4 rounded-xl space-y-1">
                 <p>
                   Escribe <strong className="underline font-black">ELIMINAR</strong> a continuación para confirmar que deseas borrar este registro definitivamente del sistema.
                 </p>
               </div>
-
-              {/* Input de confirmación */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1.5">Confirmación *</label>
                 <input 
@@ -599,11 +650,9 @@ export default function AdministracionComercialPage() {
                   placeholder="ESCRIBE ELIMINAR"
                   value={textoConfirmacion}
                   onChange={(e) => setTextoConfirmacion(e.target.value)}
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 text-xs font-bold uppercase placeholder:font-normal placeholder:text-rose-300 text-rose-600"
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#C5A059] text-xs font-bold uppercase placeholder:font-normal placeholder:text-rose-300 text-rose-600"
                 />
               </div>
-
-              {/* Botones de acción */}
               <div className="pt-2 flex justify-end gap-3">
                 <button 
                   type="button" 
@@ -616,7 +665,7 @@ export default function AdministracionComercialPage() {
                   type="button"
                   disabled={textoConfirmacion !== 'ELIMINAR'}
                   onClick={handleConfirmarEliminar}
-                  className="bg-[#FB7185] hover:bg-[#F43F5E] text-white font-bold px-6 py-2.5 rounded-xl shadow transition disabled:opacity-40 disabled:cursor-not-allowed text-xs"
+                  className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-6 py-2.5 rounded-xl shadow transition disabled:opacity-40 disabled:cursor-not-allowed text-xs"
                 >
                   Presiona ELIMINAR
                 </button>
@@ -629,14 +678,13 @@ export default function AdministracionComercialPage() {
       {/* MODAL DE CÓDIGO QR */}
       {isQrModalOpen && empresaQrSeleccionada && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl p-6 text-center space-y-4">
-            <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-black text-slate-900 text-base">QR de Aceptación de Términos</h3>
-              <button onClick={() => setIsQrModalOpen(false)} className="text-slate-400 hover:text-slate-700">
+          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl p-6 text-center space-y-4 border border-slate-100">
+            <div className="bg-[#181818] text-[#C5A059] -mx-6 -mt-6 p-4 mb-4 flex justify-between items-center border-b border-[#C5A059]/20">
+              <h3 className="font-bold text-sm">QR de Aceptación de Términos</h3>
+              <button onClick={() => setIsQrModalOpen(false)} className="text-neutral-400 hover:text-white">
                 <X size={20} />
               </button>
             </div>
-            
             <p className="text-xs text-slate-500">
               Escanea el código para precargar los datos de <strong>{empresaQrSeleccionada.nombre_cliente}</strong> en el formulario de Zoho.
             </p>
@@ -661,12 +709,12 @@ export default function AdministracionComercialPage() {
         </div>
       )}
 
-      {/* MODAL 1: NUEVA / EDITAR EMPRESA */}
+      {/* MODAL 1: NUEVA / EDITAR EMPRESA CON LIMITADORES Y VALIDACIONES */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl">
-            <div className="bg-[#181818] text-white px-6 py-4 flex justify-between items-center">
-              <h3 className="font-bold text-base">
+          <div className="bg-white rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl border border-slate-100">
+            <div className="bg-[#181818] text-[#C5A059] px-6 py-4 flex justify-between items-center border-b border-[#C5A059]/20">
+              <h3 className="font-bold text-sm">
                 {editingId ? 'Editar empresa' : 'Nueva empresa'}
               </h3>
               <button onClick={() => { setIsModalOpen(false); resetFormularioEmpresa(); }} className="text-neutral-400 hover:text-white">
@@ -677,34 +725,78 @@ export default function AdministracionComercialPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Empresa *</label>
-                  <input type="text" value={empresa} onChange={(e) => setEmpresa(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
+                  <input 
+                    type="text" 
+                    value={empresa} 
+                    onChange={(e) => setEmpresa(e.target.value)} 
+                    placeholder="Ej: Sustrato WorkCoffee SpA"
+                    maxLength={100}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]" 
+                    required 
+                  />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">RUT empresa *</label>
-                  <input type="text" value={rutEmpresa} onChange={(e) => setRutEmpresa(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
+                  <label className="block font-bold text-slate-700 mb-1">RUT empresa * (Ej: 76123456-7)</label>
+                  <input 
+                    type="text" 
+                    value={rutEmpresa} 
+                    onChange={(e) => setRutEmpresa(e.target.value)} 
+                    placeholder="76123456-7"
+                    maxLength={12}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]" 
+                    required 
+                  />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Representante legal</label>
-                  <input type="text" value={representanteLegal} onChange={(e) => setRepresentanteLegal(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
+                  <input 
+                    type="text" 
+                    value={representanteLegal} 
+                    onChange={(e) => setRepresentanteLegal(e.target.value)} 
+                    placeholder="Nombre completo"
+                    maxLength={100}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]" 
+                  />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">RUT representante</label>
-                  <input type="text" value={rutRepresentante} onChange={(e) => setRutRepresentante(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
+                  <label className="block font-bold text-slate-700 mb-1">RUT representante (Ej: 12345678-9)</label>
+                  <input 
+                    type="text" 
+                    value={rutRepresentante} 
+                    onChange={(e) => setRutRepresentante(e.target.value)} 
+                    placeholder="12345678-9"
+                    maxLength={12}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]" 
+                  />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Teléfono</label>
-                  <input type="text" value={telefono} onChange={(e) => setTelefono(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
+                  <input 
+                    type="text" 
+                    value={telefono} 
+                    onChange={(e) => setTelefono(e.target.value)} 
+                    placeholder="+56912345678"
+                    maxLength={20}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]" 
+                  />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Correo</label>
-                  <input type="email" value={correo} onChange={(e) => setCorreo(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
+                  <input 
+                    type="email" 
+                    value={correo} 
+                    onChange={(e) => setCorreo(e.target.value)} 
+                    placeholder="contacto@empresa.cl"
+                    maxLength={100}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]" 
+                  />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Espacio asignado *</label>
                   <select 
                     value={tipoEspacio} 
                     onChange={(e) => setTipoEspacio(e.target.value)} 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-medium"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-medium focus:outline-none focus:ring-1 focus:ring-[#C5A059]"
                   >
                     {listaOficinas.map((of) => {
                       const estaOcupada = oficinasOcupadas.includes(of)
@@ -718,18 +810,25 @@ export default function AdministracionComercialPage() {
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Fecha inicio contrato *</label>
-                  <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
+                  <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]" required />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Frecuencia de cobro</label>
-                  <select value={frecuencia} onChange={(e) => setFrecuencia(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
+                  <select value={frecuencia} onChange={(e) => setFrecuencia(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-[#C5A059]">
                     <option value="MENSUAL">MENSUAL</option>
                     <option value="ANUAL">ANUAL</option>
                   </select>
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Monto mensual ($)</label>
-                  <input type="number" value={montoMensual} onChange={(e) => setMontoMensual(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
+                  <input 
+                    type="number" 
+                    value={montoMensual} 
+                    onChange={(e) => setMontoMensual(e.target.value)} 
+                    min={0}
+                    max={10000000}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]" 
+                  />
                 </div>
                 {editingId && (
                   <div>
@@ -749,7 +848,14 @@ export default function AdministracionComercialPage() {
               </div>
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Observaciones</label>
-                <textarea rows={3} value={observaciones} onChange={(e) => setObservaciones(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
+                <textarea 
+                  rows={3} 
+                  value={observaciones} 
+                  onChange={(e) => setObservaciones(e.target.value)} 
+                  maxLength={300}
+                  placeholder="Notas adicionales..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]" 
+                />
               </div>
               <div className="pt-2 flex justify-end gap-2">
                 <button 
@@ -759,8 +865,12 @@ export default function AdministracionComercialPage() {
                 >
                   Cancelar
                 </button>
-                <button type="submit" className="bg-[#C5A059] hover:bg-[#b59049] text-slate-950 font-bold px-5 py-2 rounded-lg shadow transition">
-                  {editingId ? 'Guardar cambios' : 'Guardar empresa'}
+                <button 
+                  type="submit" 
+                  disabled={savingEmpresa}
+                  className="bg-[#C5A059] hover:bg-[#b59049] text-slate-950 font-bold px-5 py-2 rounded-lg shadow transition disabled:opacity-50"
+                >
+                  {savingEmpresa ? 'Guardando...' : editingId ? 'Guardar cambios' : 'Guardar empresa'}
                 </button>
               </div>
             </form>
@@ -771,17 +881,17 @@ export default function AdministracionComercialPage() {
       {/* MODAL 2: CONTROL DE PAGOS */}
       {isPagosModalOpen && empresaSeleccionada && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100">
             
-            <div className="p-6 border-b border-slate-100 flex justify-between items-start sticky top-0 bg-white z-10">
+            <div className="p-6 border-b border-[#C5A059]/20 flex justify-between items-start sticky top-0 bg-[#181818] text-white z-10">
               <div>
-                <p className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">CONTROL DE PAGOS</p>
-                <h3 className="text-xl font-black text-slate-900 mt-0.5">
+                <p className="text-[11px] font-bold text-[#C5A059] uppercase tracking-wider">CONTROL DE PAGOS</p>
+                <h3 className="text-xl font-black text-white mt-0.5">
                   {editingPagoId ? 'Editar registro de pago' : 'Registrar pago'}
                 </h3>
-                <p className="text-xs text-slate-500">Empresa: <strong>{empresaSeleccionada.nombre_cliente}</strong> ({empresaSeleccionada.tipo_espacio})</p>
+                <p className="text-xs text-neutral-300">Empresa: <strong>{empresaSeleccionada.nombre_cliente}</strong> ({empresaSeleccionada.tipo_espacio})</p>
               </div>
-              <button onClick={() => setIsPagosModalOpen(false)} className="text-slate-400 hover:text-slate-700">
+              <button onClick={() => setIsPagosModalOpen(false)} className="text-neutral-400 hover:text-white">
                 <X size={20} />
               </button>
             </div>
@@ -912,7 +1022,6 @@ export default function AdministracionComercialPage() {
                     />
                   </div>
                 </div>
-
                 <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
                   <div>
                     <p className="text-[10px] font-semibold text-slate-500">Monto bruto</p>
@@ -935,7 +1044,6 @@ export default function AdministracionComercialPage() {
                     <p className="font-bold text-amber-700 text-xs mt-0.5">${comisionTarjetaCalculada.toLocaleString('es-CL')}</p>
                   </div>
                 </div>
-
                 <div className="pt-2 flex justify-end gap-3">
                   <button type="button" onClick={() => setIsPagosModalOpen(false)} className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700">
                     Cancelar
@@ -943,7 +1051,7 @@ export default function AdministracionComercialPage() {
                   <button 
                     type="submit" 
                     disabled={uploading} 
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2 rounded-lg shadow transition disabled:opacity-50 flex items-center gap-2"
+                    className="bg-[#C5A059] hover:bg-[#b59049] text-slate-950 font-bold px-6 py-2 rounded-lg shadow transition disabled:opacity-50 flex items-center gap-2"
                   >
                     {uploading ? 'Guardando...' : editingPagoId ? 'Actualizar pago' : 'Registrar pago'}
                   </button>
