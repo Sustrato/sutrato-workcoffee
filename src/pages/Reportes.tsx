@@ -8,6 +8,7 @@ interface PagoReporte {
   bruto: number | string | null
   neto: number | string | null
   iva: number | string | null
+  comision_tarjeta?: number | string | null
   proximo_pago: string | null
 }
 
@@ -31,6 +32,7 @@ interface ReportRow {
   cantidadPagos: number
   recaudacion: number
   iva: number
+  comision: number
   utilidad: number
 }
 
@@ -58,10 +60,8 @@ function getVencimiento(payments: PagoReporte[]): { status: EstadoVencimiento; d
     .filter((payment) => Boolean(payment.proximo_pago))
     .sort((first, second) => second.fecha_pago.localeCompare(first.fecha_pago))[0]
   if (!latestPayment?.proximo_pago) return { status: 'unavailable', date: null }
-
   const [year, month, day] = latestPayment.proximo_pago.slice(0, 10).split('-').map(Number)
   if (!year || !month || !day) return { status: 'unavailable', date: latestPayment.proximo_pago }
-
   const today = new Date()
   const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
   const dueUtc = Date.UTC(year, month - 1, day)
@@ -95,7 +95,7 @@ async function fetchCompanies(): Promise<EmpresaReporte[]> {
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await supabase
       .from('empresas')
-      .select('id, nombre, rut, frecuencia, estado, pagos(id, fecha_pago, bruto, neto, iva, proximo_pago)')
+      .select('id, nombre, rut, frecuencia, estado, pagos(id, fecha_pago, bruto, neto, iva, comision_tarjeta, proximo_pago)')
       .order('nombre', { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
     if (error) throw new Error(`No se pudieron cargar los datos para reportes: ${error.message}`)
@@ -145,20 +145,23 @@ export default function Reportes() {
         const monthMatches = selectedMonth === 'TODOS' || date.slice(5, 7) === selectedMonth
         return yearMatches && monthMatches
       })
+
       const due = getVencimiento(empresa.pagos ?? [])
       if (selectedVencimiento !== 'TODOS' && due.status !== selectedVencimiento) return []
 
       const recaudacion = periodPayments.reduce((total, payment) => total + (Number(payment.bruto) || 0), 0)
-      const utilidad = periodPayments.reduce((total, payment) => {
-        const bruto = Number(payment.bruto) || 0
-        return total + (payment.neto === null || payment.neto === undefined ? bruto / 1.19 : Number(payment.neto) || 0)
-      }, 0)
+      
       const iva = periodPayments.reduce((total, payment) => {
         if (payment.iva !== null && payment.iva !== undefined) return total + (Number(payment.iva) || 0)
         const bruto = Number(payment.bruto) || 0
         const neto = payment.neto === null || payment.neto === undefined ? bruto / 1.19 : Number(payment.neto) || 0
         return total + bruto - neto
       }, 0)
+
+      const comision = periodPayments.reduce((total, payment) => total + (Number(payment.comision_tarjeta) || 0), 0)
+
+      // Utilidad neta real = Recaudación Bruta - IVA - Comisión de Tarjeta
+      const utilidad = recaudacion - iva - comision
 
       return [{
         empresa,
@@ -168,6 +171,7 @@ export default function Reportes() {
         cantidadPagos: periodPayments.length,
         recaudacion,
         iva,
+        comision,
         utilidad,
       }]
     })
@@ -176,11 +180,12 @@ export default function Reportes() {
   const totals = reportRows.reduce((result, row) => ({
     recaudacion: result.recaudacion + row.recaudacion,
     iva: result.iva + row.iva,
+    comision: result.comision + row.comision,
     utilidad: result.utilidad + row.utilidad,
-  }), { recaudacion: 0, iva: 0, utilidad: 0 })
+  }), { recaudacion: 0, iva: 0, comision: 0, utilidad: 0 })
 
   function exportReport() {
-    const headers = ['Empresa', 'RUT', 'Estado empresa', 'Frecuencia', 'Estado de pago', 'Próximo pago', 'Transacciones', 'Recaudación bruta', 'IVA', 'Utilidad neta']
+    const headers = ['Empresa', 'RUT', 'Estado empresa', 'Frecuencia', 'Estado de pago', 'Próximo pago', 'Transacciones', 'Recaudación bruta', 'IVA', 'Comisión tarjeta', 'Utilidad neta real']
     const statusLabels: Record<EstadoVencimiento, string> = {
       'on-time': 'Al día',
       upcoming: 'Por vencer',
@@ -197,13 +202,15 @@ export default function Reportes() {
       row.cantidadPagos,
       row.recaudacion,
       row.iva,
+      row.comision,
       row.utilidad,
     ])].map((record) => record.map(escapeCsv).join(';')).join('\r\n')}`
+
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `reportes_${selectedYear}_${selectedMonth.toLowerCase()}.csv`
+    link.download = `reportes_virtuales_${selectedYear}_${selectedMonth.toLowerCase()}.csv`
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -216,6 +223,7 @@ export default function Reportes() {
     overdue: 'bg-rose-50 text-rose-700',
     unavailable: 'bg-slate-100 text-slate-500',
   }
+
   const dueLabels: Record<EstadoVencimiento, string> = {
     'on-time': 'Al día',
     upcoming: 'Por vencer',
@@ -229,8 +237,8 @@ export default function Reportes() {
         <div className="flex items-center gap-3">
           <span className="flex size-11 items-center justify-center rounded-lg bg-primary-50 text-primary-700"><BarChart3 size={21} /></span>
           <div>
-            <h1 className="text-xl font-semibold text-slate-900">Reportes avanzados</h1>
-            <p className="mt-1 text-sm text-slate-500">Recaudación, utilidad y vencimientos por periodo.</p>
+            <h1 className="text-xl font-semibold text-slate-900">Reportes de oficinas virtuales</h1>
+            <p className="mt-1 text-sm text-slate-500">Recaudación, comisiones, utilidad real y vencimientos por periodo.</p>
           </div>
         </div>
         <button type="button" onClick={exportReport} disabled={isLoading || reportRows.length === 0} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-50">
@@ -271,10 +279,11 @@ export default function Reportes() {
         </label>
       </section>
 
-      <section aria-label="Totales del periodo" className="grid gap-3 sm:grid-cols-3">
+      <section aria-label="Totales del periodo" className="grid gap-3 sm:grid-cols-4">
         <article className="rounded-lg border border-slate-200 bg-white p-4"><p className="text-xs font-medium text-slate-500">Recaudación bruta</p><p className="mt-2 text-xl font-semibold text-slate-900">{formatMoney(totals.recaudacion)}</p></article>
         <article className="rounded-lg border border-slate-200 bg-white p-4"><p className="text-xs font-medium text-slate-500">IVA</p><p className="mt-2 text-xl font-semibold text-slate-900">{formatMoney(totals.iva)}</p></article>
-        <article className="rounded-lg border border-slate-200 bg-white p-4"><p className="text-xs font-medium text-slate-500">Utilidad neta</p><p className="mt-2 text-xl font-semibold text-slate-900">{formatMoney(totals.utilidad)}</p></article>
+        <article className="rounded-lg border border-slate-200 bg-white p-4"><p className="text-xs font-medium text-slate-500">Comisión tarjeta</p><p className="mt-2 text-xl font-semibold text-amber-700">{formatMoney(totals.comision)}</p></article>
+        <article className="rounded-lg border border-slate-200 bg-white p-4"><p className="text-xs font-medium text-slate-500">Utilidad neta real</p><p className="mt-2 text-xl font-semibold text-emerald-700">{formatMoney(totals.utilidad)}</p></article>
       </section>
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
@@ -284,9 +293,18 @@ export default function Reportes() {
           <p className="p-10 text-center text-sm text-slate-500">No hay empresas que coincidan con los filtros.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-left">
+            <table className="w-full min-w-[1200px] text-left">
               <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500"><tr>
-                <th className="px-4 py-3">Empresa / RUT</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Plan</th><th className="px-4 py-3">Vencimiento</th><th className="px-4 py-3">Próximo pago</th><th className="px-4 py-3 text-right">Pagos</th><th className="px-4 py-3 text-right">Recaudación</th><th className="px-4 py-3 text-right">IVA</th><th className="px-4 py-3 text-right">Utilidad</th>
+                <th className="px-4 py-3">Empresa / RUT</th>
+                <th className="px-4 py-3">Estado</th>
+                <th className="px-4 py-3">Plan</th>
+                <th className="px-4 py-3">Vencimiento</th>
+                <th className="px-4 py-3">Próximo pago</th>
+                <th className="px-4 py-3 text-right">Pagos</th>
+                <th className="px-4 py-3 text-right">Recaudación</th>
+                <th className="px-4 py-3 text-right">IVA</th>
+                <th className="px-4 py-3 text-right">Comisión</th>
+                <th className="px-4 py-3 text-right">Utilidad Real</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-100 text-sm">
                 {reportRows.map((row) => <tr key={String(row.empresa.id)}>
@@ -298,7 +316,8 @@ export default function Reportes() {
                   <td className="px-4 py-3 text-right text-slate-600">{row.cantidadPagos}</td>
                   <td className="px-4 py-3 text-right font-medium text-slate-800">{formatMoney(row.recaudacion)}</td>
                   <td className="px-4 py-3 text-right text-slate-600">{formatMoney(row.iva)}</td>
-                  <td className="px-4 py-3 text-right text-slate-600">{formatMoney(row.utilidad)}</td>
+                  <td className="px-4 py-3 text-right text-amber-700 font-semibold">{formatMoney(row.comision)}</td>
+                  <td className="px-4 py-3 text-right font-extrabold text-emerald-700">{formatMoney(row.utilidad)}</td>
                 </tr>)}
               </tbody>
             </table>

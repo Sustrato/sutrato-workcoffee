@@ -48,7 +48,7 @@ interface Pago {
   comision_tarjeta?: number | null
   proximo_pago?: string
   voucher_url?: string | null
-  factura_url?: string | null // <-- Casilla añadida para la factura
+  factura_url?: string | null
 }
 
 type CsvExportOption = 'completo' | 'empresas' | 'pagos'
@@ -298,7 +298,7 @@ export default function Empresas() {
   const [isImportingCsv, setIsImportingCsv] = useState(false)
   const importCsvInputRef = useRef<HTMLInputElement>(null)
   const voucherInputRef = useRef<HTMLInputElement>(null)
-  const facturaInputRef = useRef<HTMLInputElement>(null) // <-- Ref para la factura
+  const facturaInputRef = useRef<HTMLInputElement>(null)
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [estadoEmpresaFilter, setEstadoEmpresaFilter] = useState<EstadoEmpresaFilter>('TODAS')
@@ -323,12 +323,12 @@ export default function Empresas() {
   const [deletePagoError, setDeletePagoError] = useState('')
   const [pagoEditForm, setPagoEditForm] = useState<PagoEditFormData>({ fecha_pago: '', proximo_pago: '', forma_pago: 'Transferencia', bruto: '', monto_liquido: '' })
   const [voucherEditFile, setVoucherEditFile] = useState<File | null>(null)
-  const [facturaEditFile, setFacturaEditFile] = useState<File | null>(null) // <-- Estado para factura al editar
+  const [facturaEditFile, setFacturaEditFile] = useState<File | null>(null)
   const voucherEditInputRef = useRef<HTMLInputElement>(null)
-  const facturaEditInputRef = useRef<HTMLInputElement>(null) // <-- Ref para editar factura
+  const facturaEditInputRef = useRef<HTMLInputElement>(null)
   const [pagoForm, setPagoForm] = useState<PagoFormData>(EMPTY_PAGO)
   const [voucherFile, setVoucherFile] = useState<File | null>(null)
-  const [facturaFile, setFacturaFile] = useState<File | null>(null) // <-- Archivo de factura seleccionada
+  const [facturaFile, setFacturaFile] = useState<File | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -706,20 +706,16 @@ export default function Empresas() {
       const empresaId = selectedEmpresa.id
       let voucherUrl: string | null = null
       let facturaUrl: string | null = null
-
       if (voucherFile) {
         const uploadedVoucher = await uploadVoucher(voucherFile, empresaId)
         voucherUrl = uploadedVoucher.url
         uploadedVoucherPath = uploadedVoucher.path
       }
-
-      // Subir factura si se seleccionó
       if (facturaFile) {
         const uploadedFactura = await uploadVoucher(facturaFile, empresaId)
         facturaUrl = uploadedFactura.url
         uploadedFacturaPath = uploadedFactura.path
       }
-
       await empresaService.createPago({
         empresa_id: String(empresaId),
         fecha_pago: pagoForm.fecha_pago,
@@ -731,7 +727,7 @@ export default function Empresas() {
         comision_tarjeta: comisionTarjeta,
         proximo_pago: pagoForm.proximo_pago,
         voucher_url: voucherUrl,
-        factura_url: facturaUrl, // <-- Guardamos la URL de la factura
+        factura_url: facturaUrl,
       })
       paymentSaved = true
       await empresaService.updateEmpresa(empresaId, { estado: 'VIGENTE' })
@@ -809,21 +805,18 @@ export default function Empresas() {
     try {
       let voucherUrl = editingPago.voucher_url ?? null
       let facturaUrl = editingPago.factura_url ?? null
-
       if (voucherEditFile) {
         const companyId = selectedEmpresa?.id ?? selectedEmpresa?.rut ?? 'empresa'
         const uploadedVoucher = await uploadVoucher(voucherEditFile, companyId)
         voucherUrl = uploadedVoucher.url
         uploadedVoucherPath = uploadedVoucher.path
       }
-
       if (facturaEditFile) {
         const companyId = selectedEmpresa?.id ?? selectedEmpresa?.rut ?? 'empresa'
         const uploadedFactura = await uploadVoucher(facturaEditFile, companyId)
         facturaUrl = uploadedFactura.url
         uploadedFacturaPath = uploadedFactura.path
       }
-
       await empresaService.updatePago(editingPago.id, {
         fecha_pago: pagoEditForm.fecha_pago,
         proximo_pago: pagoEditForm.proximo_pago,
@@ -834,7 +827,7 @@ export default function Empresas() {
         monto_liquido: montoLiquidoEditado,
         comision_tarjeta: comisionTarjetaEditada,
         voucher_url: voucherUrl,
-        factura_url: facturaUrl, // <-- Actualizar factura
+        factura_url: facturaUrl,
       })
       window.dispatchEvent(new Event(PAYMENTS_UPDATED_EVENT))
       if (voucherEditFile && editingPago.voucher_url) {
@@ -843,7 +836,6 @@ export default function Empresas() {
       if (facturaEditFile && editingPago.factura_url) {
         await deleteVoucherByPublicUrl(editingPago.factura_url)
       }
-
       const updatedPayments = (selectedEmpresa?.pagos ?? []).map((pago) =>
         pago.id === editingPago.id
           ? { ...pago, fecha_pago: pagoEditForm.fecha_pago, proximo_pago: pagoEditForm.proximo_pago, forma_pago: pagoEditForm.forma_pago, bruto: brutoEditado, neto: netoEditado, iva: ivaEditado, monto_liquido: montoLiquidoEditado, comision_tarjeta: comisionTarjetaEditada, voucher_url: voucherUrl, factura_url: facturaUrl }
@@ -868,13 +860,13 @@ export default function Empresas() {
   }
 
   async function handleDeletePago() {
-    if (pagoToDelete?.id === undefined || deletePagoConfirmation !== 'Eliminar' || isDeletingPago) return
+    if (pagoToDelete?.id === undefined || deletePagoConfirmation.trim() !== 'ELIMINAR' || isDeletingPago) return
     setIsDeletingPago(true)
     setDeletePagoError('')
     try {
       await empresaService.deletePago(pagoToDelete.id)
       if (pagoToDelete.voucher_url) await deleteVoucherByPublicUrl(pagoToDelete.voucher_url)
-      if (pagoToDelete.factura_url) await deleteVoucherByPublicUrl(pagoToDelete.factura_url) // <-- Eliminar factura de Storage
+      if (pagoToDelete.factura_url) await deleteVoucherByPublicUrl(pagoToDelete.factura_url)
       const updatedPayments = (selectedEmpresa?.pagos ?? []).filter((pago) => pago.id !== pagoToDelete.id)
       if (selectedEmpresa) setSelectedEmpresa({ ...selectedEmpresa, pagos: updatedPayments })
       setEmpresas((current) => current.map((empresa) =>
@@ -981,6 +973,7 @@ export default function Empresas() {
   const ivaCalculado = Math.round((bruto - netoCalculado) * 100) / 100
   const montoLiquidoForm = pagoForm.monto_liquido.trim() === '' ? bruto : Number(pagoForm.monto_liquido) || 0
   const comisionTarjetaForm = Math.max(0, Math.round((bruto - montoLiquidoForm) * 100) / 100)
+
   const brutoEditadoPreview = Number(pagoEditForm.bruto) || 0
   const montoLiquidoEditPreview = pagoEditForm.monto_liquido.trim() === '' ? brutoEditadoPreview : Number(pagoEditForm.monto_liquido) || 0
   const comisionTarjetaEditPreview = Math.max(0, Math.round((brutoEditadoPreview - montoLiquidoEditPreview) * 100) / 100)
@@ -1028,6 +1021,7 @@ export default function Empresas() {
         </div>,
         document.body,
       )}
+
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="mb-2 text-sm font-semibold text-primary-600">Administración comercial</p>
@@ -1120,10 +1114,12 @@ export default function Empresas() {
           </button>
         </div>
       </section>
+
+      {/* MODAL DE ELIMINACIÓN DE PAGO CON Z-INDEX SUPERIOR Y VALIDACIÓN ESTRICTA */}
       {pagoToDelete && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-[2px]">
-          <section role="alertdialog" aria-modal="true" aria-labelledby="delete-payment-title" aria-describedby="delete-payment-warning" className="my-auto w-full max-w-lg overflow-hidden rounded-xl border border-rose-100 bg-white shadow-2xl shadow-slate-950/25">
-            <div className="border-b border-slate-100 px-4 py-5 sm:px-6">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-[2px]">
+          <section role="alertdialog" aria-modal="true" aria-labelledby="delete-payment-title" aria-describedby="delete-payment-warning" className="my-auto w-full max-w-lg overflow-hidden rounded-2xl border border-rose-100 bg-white shadow-2xl shadow-slate-950/30">
+            <div className="border-b border-slate-100 px-6 py-5">
               <div className="flex items-start gap-3">
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-700"><Trash2 size={19} /></span>
                 <div>
@@ -1132,27 +1128,40 @@ export default function Empresas() {
                 </div>
               </div>
             </div>
-            <div className="space-y-4 px-4 py-5 sm:px-6">
+            <div className="space-y-4 px-6 py-5">
               <p id="delete-payment-warning" className="text-sm leading-6 text-slate-700">
-                Si elimina el pago, perderá toda la información relacionada con este.
+                Si elimina el pago, perderá toda la información relacionada con este. Escribe <strong className="font-bold underline text-rose-600">ELIMINAR</strong> para confirmar.
               </p>
               <div>
-                <label htmlFor="delete-payment-confirmation" className="mb-1.5 block text-sm font-medium text-slate-700">Escribe ELIMINAR para confirmar</label>
+                <label htmlFor="delete-payment-confirmation" className="mb-1.5 block text-sm font-medium text-slate-700">Confirmación *</label>
                 <input
                   id="delete-payment-confirmation"
                   type="text"
                   autoComplete="off"
+                  placeholder="ELIMINAR"
                   value={deletePagoConfirmation}
                   onChange={(event) => setDeletePagoConfirmation(event.target.value)}
                   disabled={isDeletingPago}
-                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 disabled:bg-slate-50"
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-rose-600 uppercase outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 disabled:bg-slate-50"
                 />
               </div>
               {deletePagoError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{deletePagoError}</p>}
             </div>
-            <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-4 py-4 sm:flex-row sm:justify-end sm:px-6">
-              <button type="button" onClick={() => { setPagoToDelete(null); setDeletePagoConfirmation(''); setDeletePagoError('') }} disabled={isDeletingPago} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
-              <button type="button" onClick={() => void handleDeletePago()} disabled={isDeletingPago || deletePagoConfirmation !== 'ELIMINAR'} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50">
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-6 py-4 sm:flex-row sm:justify-end">
+              <button 
+                type="button" 
+                onClick={() => { setPagoToDelete(null); setDeletePagoConfirmation(''); setDeletePagoError('') }} 
+                disabled={isDeletingPago} 
+                className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button 
+                type="button" 
+                onClick={() => void handleDeletePago()} 
+                disabled={isDeletingPago || deletePagoConfirmation.trim() !== 'ELIMINAR'} 
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
                 {isDeletingPago ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
                 {isDeletingPago ? 'Eliminando...' : 'Eliminar pago'}
               </button>
@@ -1160,6 +1169,7 @@ export default function Empresas() {
           </section>
         </div>
       )}
+
       {(error || success) && (
         <div
           role={error ? 'alert' : 'status'}
@@ -1180,6 +1190,7 @@ export default function Empresas() {
           )}
         </div>
       )}
+
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/[0.02]">
         <div className="flex flex-col gap-4 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:px-5">
           <div>
@@ -1408,6 +1419,7 @@ export default function Empresas() {
           </div>
         )}
       </section>
+
       {isEmpresaModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/45 p-4 backdrop-blur-[2px]">
           <section role="dialog" aria-modal="true" aria-labelledby="new-company-title" className="my-auto w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl shadow-slate-950/20">
@@ -1538,6 +1550,7 @@ export default function Empresas() {
           </section>
         </div>
       )}
+
       {empresaToDelete && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-[2px]">
           <section role="alertdialog" aria-modal="true" aria-labelledby="delete-company-title" aria-describedby="delete-company-warning" className="my-auto w-full max-w-lg overflow-hidden rounded-xl border border-rose-100 bg-white shadow-2xl shadow-slate-950/25">
@@ -1578,6 +1591,7 @@ export default function Empresas() {
           </section>
         </div>
       )}
+
       {selectedEmpresa && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/45 p-4 backdrop-blur-[2px]">
           <section role="dialog" aria-modal="true" aria-labelledby="payments-title" className="my-auto w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl shadow-slate-950/20">
@@ -1611,7 +1625,7 @@ export default function Empresas() {
                           <th className="px-4 py-3">Comisión</th>
                           <th className="px-4 py-3">Próximo pago</th>
                           <th className="px-4 py-3">Comprobante</th>
-                          <th className="px-4 py-3">Factura</th> {/* <-- Nueva columna en la tabla */}
+                          <th className="px-4 py-3">Factura</th>
                           <th className="px-4 py-3 text-right">Acción</th>
                         </tr>
                       </thead>
@@ -1774,8 +1788,6 @@ export default function Empresas() {
                       </p>
                     )}
                   </div>
-
-                  {/* NUEVA CASILLA PARA LA FACTURA */}
                   <div>
                     <label htmlFor="pago-factura" className="mb-1.5 block text-sm font-medium text-slate-700">Factura adjuntada (opcional)</label>
                     <input
@@ -1819,7 +1831,6 @@ export default function Empresas() {
                     )}
                   </div>
                 </div>
-
                 <div className="grid gap-3 rounded-xl border border-primary-100 bg-primary-50/60 p-4 sm:grid-cols-2 lg:grid-cols-5">
                   <div>
                     <p className="text-xs font-medium text-slate-500">Monto bruto</p>
@@ -1855,6 +1866,7 @@ export default function Empresas() {
           </section>
         </div>
       )}
+
       {editingPago && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-slate-900/45 p-4 backdrop-blur-[2px]">
           <section role="dialog" aria-modal="true" aria-labelledby="edit-payment-title" className="my-auto w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl shadow-slate-950/20">
@@ -1939,8 +1951,6 @@ export default function Empresas() {
                     className="block w-full rounded-lg border border-slate-200 bg-white text-sm text-slate-600 file:mr-3 file:h-10 file:border-0 file:bg-slate-50 file:px-4 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-primary-50"
                   />
                 </div>
-
-                {/* EDICIÓN DE FACTURA */}
                 <div className="space-y-2">
                   <p className="block text-sm font-medium text-slate-700">Factura adjuntada</p>
                   {editingPago.factura_url ? (
@@ -1989,7 +1999,6 @@ export default function Empresas() {
                   />
                 </div>
               </div>
-
               {(() => {
                 const editBruto = Number(pagoEditForm.bruto) || 0
                 const editNeto = Math.round((editBruto / 1.19) * 100) / 100
