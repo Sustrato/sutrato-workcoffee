@@ -50,16 +50,15 @@ export default function ClientesParticularesPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
   
-  // 🌟 Estado para notificaciones corporativas flotantes (Sustrato)
+  // Estados para notificaciones corporativas flotantes (Sustrato)
   const [mensajeExito, setMensajeExito] = useState<string | null>(null)
   const [mensajeError, setMensajeError] = useState<string | null>(null)
   
   const mostrarExito = (msg: string) => {
     setMensajeExito(msg)
     setMensajeError(null)
-    setTimeout(() => setMensajeExito(null), 4000) // Se oculta solo a los 4 segundos
+    setTimeout(() => setMensajeExito(null), 4000)
   }
-
   const mostrarError = (msg: string) => {
     setMensajeError(msg)
     setMensajeExito(null)
@@ -233,21 +232,61 @@ export default function ClientesParticularesPage() {
     window.open(url, '_blank')
   }
 
+  // 🌟 Función robusta de cálculo directo para horas y montos
+  const calcularHorasYPrecios = (hIn: string, hOut: string, mod: string) => {
+    if (!hIn || !hOut) return
+    const hInParts = hIn.substring(0, 5)
+    const hOutParts = hOut.substring(0, 5)
+
+    const [hI, mI] = hInParts.split(':').map(Number)
+    const [hO, mO] = hOutParts.split(':').map(Number)
+
+    if (!isNaN(hI) && !isNaN(mI) && !isNaN(hO) && !isNaN(mO)) {
+      const minInicio = hI * 60 + mI
+      const minFin = hO * 60 + mO
+      let diffMinutos = minFin - minInicio
+      if (diffMinutos < 0) diffMinutos += 24 * 60
+
+      const horasDecimales = diffMinutos / 60
+      setHorasCalculadas(Number(horasDecimales.toFixed(2)))
+
+      let calculado = 3000
+      if (mod === 'Por hora') {
+        const tarifaPorMinuto = 3000 / 60
+        calculado = Math.round(diffMinutos * tarifaPorMinuto)
+      } else if (mod === 'Por día') {
+        calculado = 20000
+      } else if (mod === 'Por semana') {
+        calculado = 102000
+      } else if (mod === 'Mensual') {
+        calculado = 350000
+      }
+      setValorCalculado(calculado)
+      setMontoLiquidoCustom(calculado)
+    }
+  }
+
   const handleSeleccionarVisitaParaEditar = (visita: UsoOficina) => {
     setEditingVisitaId(visita.id)
     setOficina(visita.oficina_asignada || 'Oficina 1')
     setFechaIngreso(visita.fecha_inicio || new Date().toISOString().split('T')[0])
     setFechaTermino(visita.fecha_fin || new Date().toISOString().split('T')[0])
-    setHoraIngreso(visita.hora_inicio || '09:00')
-    setHoraSalida(visita.hora_fin || '10:00')
-    setModalidad(visita.modalidad || 'Por hora')
+    
+    const hIn = visita.hora_inicio || '09:00'
+    const hOut = visita.hora_fin || '10:00'
+    setHoraIngreso(hIn)
+    setHoraSalida(hOut)
+    
+    const mod = visita.modalidad || 'Por hora'
+    setModalidad(mod)
     setEstadoPago(visita.estado_pago || 'Pagado')
     setFormaPago(visita.forma_pago || 'Transferencia')
-    setValorCalculado(visita.monto_total || 3000)
-    setMontoLiquidoCustom(visita.monto_liquido ?? visita.monto_total ?? 3000)
     setBasesAceptadas(visita.bases_aceptadas ?? true)
     setVoucherActualUrl(visita.voucher_url || '')
     setVoucherFile(null)
+
+    // Forzamos el recálculo al seleccionar del historial
+    calcularHorasYPrecios(hIn, hOut, mod)
   }
 
   const handleVerVoucherSeguro = async (urlOriginal: string) => {
@@ -310,33 +349,6 @@ export default function ClientesParticularesPage() {
     }
   }, [isArriendoModalOpen, fechaIngreso, horaIngreso, horaSalida])
 
-  useEffect(() => {
-    if (horaIngreso && horaSalida && !editingVisitaId) {
-      const [hIn, mIn] = horaIngreso.split(':').map(Number)
-      const [hOut, mOut] = horaSalida.split(':').map(Number)
-      const minInicio = hIn * 60 + mIn
-      const minFin = hOut * 60 + mOut
-      let diffMinutos = minFin - minInicio
-      if (diffMinutos < 0) diffMinutos += 24 * 60
-      const horasDecimales = diffMinutos / 60
-      setHorasCalculadas(Number(horasDecimales.toFixed(2)))
-      
-      let calculado = 3000
-      if (modalidad === 'Por hora') {
-        const tarifaPorMinuto = 3000 / 60
-        calculado = Math.round(diffMinutos * tarifaPorMinuto)
-      } else if (modalidad === 'Por día') {
-        calculado = 20000
-      } else if (modalidad === 'Por semana') {
-        calculado = 102000
-      } else if (modalidad === 'Mensual') {
-        calculado = 350000
-      }
-      setValorCalculado(calculado)
-      setMontoLiquidoCustom(calculado)
-    }
-  }, [horaIngreso, horaSalida, modalidad, editingVisitaId])
-
   const handleGuardarCliente = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!nombreCompleto || !rut || !telefono) {
@@ -364,7 +376,6 @@ export default function ClientesParticularesPage() {
       const res = await supabase.from('clientes_particulares').insert([payload])
       error = res.error
     }
-
     if (error) {
       mostrarError('Error guardando cliente: ' + error.message)
     } else {
@@ -375,7 +386,6 @@ export default function ClientesParticularesPage() {
     }
   }
 
-  // 🧹 Eliminación de cliente con alerta limpia Sustrato (Sin usar alert nativo de Vercel/localhost)
   const handleConfirmarEliminarCliente = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!clienteAEliminar) return
@@ -394,7 +404,6 @@ export default function ClientesParticularesPage() {
     }
   }
 
-  // 🧹 Eliminación de visita con alerta limpia Sustrato
   const handleConfirmarEliminarVisita = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!visitaAEliminar) return
@@ -443,7 +452,6 @@ export default function ClientesParticularesPage() {
         .getPublicUrl(filePath)
       finalVoucherUrl = publicURLData.publicUrl
     }
-
     const payloadArriendo: any = {
       cliente_id: clienteSeleccionadoId,
       oficina_asignada: oficina,
@@ -464,7 +472,6 @@ export default function ClientesParticularesPage() {
       fecha_aceptacion_bases: fechaAceptacion,
       voucher_url: finalVoucherUrl || null
     }
-
     let error
     if (editingVisitaId) {
       const res = await supabase.from('uso_oficinas_particulares').update(payloadArriendo).eq('id', editingVisitaId)
@@ -473,7 +480,6 @@ export default function ClientesParticularesPage() {
       const res = await supabase.from('uso_oficinas_particulares').insert([payloadArriendo])
       error = res.error
     }
-
     setUploadingVoucher(false)
     if (error) {
       mostrarError('Error guardando el arriendo: ' + error.message)
@@ -501,7 +507,6 @@ export default function ClientesParticularesPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-7 font-sans relative">
       
-      {/* 🌟 SISTEMA DE NOTIFICACIONES FLOTANTES (Estilo Sustrato Pro) */}
       {(mensajeExito || mensajeError) && (
         <div className="fixed top-6 right-6 z-[9999] max-w-md animate-bounce-short">
           {mensajeExito && (
@@ -926,7 +931,6 @@ export default function ClientesParticularesPage() {
                     <strong className="text-[#C5A059]">{totalHorasAcumuladas.toFixed(1)} hrs</strong>
                   </div>
                 </div>
-
                 {historialVisitasCliente.length > 0 && (
                   <div className="space-y-1">
                     <p className="font-bold text-slate-600 text-[10px] uppercase tracking-wider">
@@ -1006,7 +1010,15 @@ export default function ClientesParticularesPage() {
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Modalidad</label>
-                  <select value={modalidad} onChange={(e) => setModalidad(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white">
+                  <select 
+                    value={modalidad} 
+                    onChange={(e) => {
+                      const nuevaMod = e.target.value
+                      setModalidad(nuevaMod)
+                      calcularHorasYPrecios(horaIngreso, horaSalida, nuevaMod)
+                    }} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white"
+                  >
                     <option value="Por hora">Por hora</option>
                     <option value="Por día">Por día</option>
                     <option value="Por semana">Por semana</option>
@@ -1039,11 +1051,29 @@ export default function ClientesParticularesPage() {
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Hora de ingreso *</label>
-                  <input type="time" value={horaIngreso} onChange={(e) => setHoraIngreso(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
+                  <input 
+                    type="time" 
+                    value={horaIngreso} 
+                    onChange={(e) => {
+                      setHoraIngreso(e.target.value)
+                      calcularHorasYPrecios(e.target.value, horaSalida, modalidad)
+                    }} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" 
+                    required 
+                  />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Hora de salida *</label>
-                  <input type="time" value={horaSalida} onChange={(e) => setHoraSalida(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
+                  <input 
+                    type="time" 
+                    value={horaSalida} 
+                    onChange={(e) => {
+                      setHoraSalida(e.target.value)
+                      calcularHorasYPrecios(horaIngreso, e.target.value, modalidad)
+                    }} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" 
+                    required 
+                  />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Horas calculadas</label>
