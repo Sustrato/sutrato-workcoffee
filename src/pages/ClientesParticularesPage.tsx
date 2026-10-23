@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
-import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink, CheckCircle2, AlertCircle, RefreshCw, FileUp } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
 interface ClienteParticular {
@@ -49,6 +49,7 @@ export default function ClientesParticularesPage() {
   const [clientes, setClientes] = useState<ClienteParticular[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
+  const [sincronizando, setSincronizando] = useState(false)
   
   // Estados para notificaciones corporativas flotantes (Sustrato)
   const [mensajeExito, setMensajeExito] = useState<string | null>(null)
@@ -69,8 +70,12 @@ export default function ClientesParticularesPage() {
   const [isClienteModalOpen, setIsClienteModalOpen] = useState(false)
   const [isArriendoModalOpen, setIsArriendoModalOpen] = useState(false)
   const [isQrModalOpen, setIsQrModalOpen] = useState(false)
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
   
   const [clienteQrSeleccionado, setClienteQrSeleccionado] = useState<any>(null)
+  const [clienteUploadSeleccionado, setClienteUploadSeleccionado] = useState<ClienteParticular | null>(null)
+  const [zohoFileManual, setZohoFileManual] = useState<File | null>(null)
+  const [uploadingZohoManual, setUploadingZohoManual] = useState(false)
   
   const [editingClienteId, setEditingClienteId] = useState<string | null>(null)
   const [editingVisitaId, setEditingVisitaId] = useState<string | null>(null)
@@ -161,6 +166,40 @@ export default function ClientesParticularesPage() {
     setLoading(false)
   }
 
+  // TIEMPO REAL (REALTIME)
+  useEffect(() => {
+    fetchClientes()
+
+    const channel = supabase
+      .channel('public:clientes_particulares')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'clientes_particulares' },
+        () => {
+          fetchClientes()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
+  const handleSincronizarZoho = async () => {
+    setSincronizando(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('sincronizar-zoho-historico')
+      if (error) throw error
+      mostrarExito('¡Sincronización ejecutada con éxito!')
+      fetchClientes()
+    } catch (err: any) {
+      mostrarError('Error al sincronizar: ' + (err.message || 'Error desconocido'))
+    } finally {
+      setSincronizando(false)
+    }
+  }
+
   const fetchHistorialVisitas = async (clienteId: string) => {
     if (!clienteId) return
     const { data } = await supabase
@@ -173,10 +212,6 @@ export default function ClientesParticularesPage() {
       setHistorialVisitasCliente(data)
     }
   }
-
-  useEffect(() => {
-    fetchClientes()
-  }, [])
 
   useEffect(() => {
     if (isArriendoModalOpen && !editingVisitaId) {
@@ -224,6 +259,64 @@ export default function ClientesParticularesPage() {
   const handleAbrirQr = (c: ClienteParticular) => {
     setClienteQrSeleccionado(c)
     setIsQrModalOpen(true)
+  }
+
+  const handleAbrirUploadManual = (c: ClienteParticular) => {
+    setClienteUploadSeleccionado(c)
+    setZohoFileManual(null)
+    setIsUploadModalOpen(true)
+  }
+
+  const handleGuardarSubidaManual = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!clienteUploadSeleccionado || !zohoFileManual) {
+      mostrarError('Debes seleccionar un archivo exportado de Zoho.')
+      return
+    }
+
+    setUploadingZohoManual(true)
+    try {
+      const fileExt = zohoFileManual.name.split('.').pop()
+      const fileName = `zoho_manual_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+      const { error: uploadError } = await supabase.storage
+        .from('vouchers')
+        .upload(fileName, zohoFileManual)
+
+      if (uploadError) throw uploadError
+
+      const { data: publicURLData } = supabase.storage
+        .from('vouchers')
+        .getPublicUrl(fileName)
+
+      const payloadManual = {
+        archivoManualNombre: zohoFileManual.name,
+        archivoUrl: publicURLData.publicUrl,
+        subidoManualmente: true,
+        fechaSubida: new Date().toISOString()
+      }
+
+      const { error: updateError } = await supabase
+        .from('clientes_particulares')
+        .update({
+          terminos_aceptados: true,
+          fecha_aceptacion: new Date().toISOString(),
+          zoho_enviado: true,
+          zoho_payload: payloadManual
+        })
+        .eq('id', clienteUploadSeleccionado.id)
+
+      if (updateError) throw updateError
+
+      mostrarExito('¡Respaldo subido y cliente marcado como aceptado con éxito!')
+      setIsUploadModalOpen(false)
+      setClienteUploadSeleccionado(null)
+      setZohoFileManual(null)
+      fetchClientes()
+    } catch (err: any) {
+      mostrarError('Error al subir el archivo: ' + err.message)
+    } finally {
+      setUploadingZohoManual(false)
+    }
   }
 
   const handleVerZohoPayload = (c: ClienteParticular) => {
@@ -345,8 +438,8 @@ export default function ClientesParticularesPage() {
 
   const handleGuardarCliente = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!nombreCompleto || !rut || !telefono) {
-      mostrarError('Completa los campos obligatorios (*)')
+    if (!nombreCompleto || !rut || !telefono || !correo) {
+      mostrarError('Completa los campos obligatorios (*) incluyendo el correo')
       return
     }
     
@@ -644,6 +737,15 @@ export default function ClientesParticularesPage() {
                       >
                         <QrCode size={12} /> Ver QR
                       </button>
+                      {!c.terminos_aceptados && (
+                        <button
+                          type="button"
+                          onClick={() => handleAbrirUploadManual(c)}
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-800 transition"
+                        >
+                          <FileUp size={11} /> Subir respaldo Zoho
+                        </button>
+                      )}
                       {c.terminos_aceptados && (
                         <button
                           type="button"
@@ -691,7 +793,7 @@ export default function ClientesParticularesPage() {
         </table>
       </section>
 
-      {/* MODAL QR CON EL FIELD_9 CORREGIDO Y OBLIGATORIO RESUELTO */}
+      {/* MODAL QR */}
       {isQrModalOpen && clienteQrSeleccionado && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl p-6 text-center space-y-4">
@@ -724,6 +826,54 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
+      {/* MODAL SUBIR RESPALDO ZOHO MANUALMENTE */}
+      {isUploadModalOpen && clienteUploadSeleccionado && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl p-6 space-y-4">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="font-black text-slate-900 text-base">Subir respaldo Zoho (Manual)</h3>
+              <button onClick={() => setIsUploadModalOpen(false)} className="text-slate-400 hover:text-slate-700">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500">
+              Sube el archivo PDF o comprobante exportado de Zoho para <strong>{clienteUploadSeleccionado.nombre_completo}</strong>. Al subirlo, pasará automáticamente a estado <strong>Aceptado</strong>.
+            </p>
+            <form onSubmit={handleGuardarSubidaManual} className="space-y-4 text-xs">
+              <div className="border border-slate-300 rounded-lg p-3 bg-slate-50">
+                <input 
+                  type="file" 
+                  accept="image/*,.pdf"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      setZohoFileManual(e.target.files[0])
+                    }
+                  }}
+                  className="w-full text-xs text-slate-600 file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-bold file:bg-[#C5A059] file:text-slate-950 hover:file:bg-[#b59049]" 
+                  required
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button 
+                  type="button" 
+                  onClick={() => setIsUploadModalOpen(false)} 
+                  className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700 hover:bg-slate-50 transition"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={uploadingZohoManual}
+                  className="bg-[#C5A059] hover:bg-amber-600 disabled:opacity-50 text-slate-950 font-bold px-5 py-2 rounded-lg shadow transition"
+                >
+                  {uploadingZohoManual ? 'Subiendo...' : 'Confirmar y marcar aceptado'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL NUEVO / EDITAR CLIENTE */}
       {isClienteModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
@@ -751,8 +901,8 @@ export default function ClientesParticularesPage() {
                   <input type="text" value={telefono} onChange={(e) => setTelefono(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Correo</label>
-                  <input type="email" value={correo} onChange={(e) => setCorreo(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
+                  <label className="block font-bold text-slate-700 mb-1">Correo *</label>
+                  <input type="email" value={correo} onChange={(e) => setCorreo(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Empresa (Opcional)</label>
