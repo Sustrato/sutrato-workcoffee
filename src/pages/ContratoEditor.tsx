@@ -8,6 +8,8 @@ import {
   getSavedContractContent,
   renderContractTemplate,
   saveContractDocument,
+  DEFAULT_CONTRACT_TEMPLATE,
+  PATRIMONIS_TEMPLATE,
   type ContractCompany,
   type ContractTemplate,
 } from '../services/contracts'
@@ -16,6 +18,7 @@ export default function ContratoEditor() {
   const { id = '' } = useParams()
   const [company, setCompany] = useState<ContractCompany | null>(null)
   const [template, setTemplate] = useState<ContractTemplate | null>(null)
+  const [tipoModelo, setTipoModelo] = useState<'general' | 'patrimonis'>('general')
   const [content, setContent] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -30,7 +33,7 @@ export default function ContratoEditor() {
         if (!active) return
         setCompany(loadedCompany)
         setTemplate(activeTemplate)
-        setContent(savedContent ?? renderContractTemplate(activeTemplate.content, loadedCompany))
+        setContent(savedContent ?? renderContractTemplate(DEFAULT_CONTRACT_TEMPLATE, loadedCompany))
       })
       .catch((loadError: unknown) => {
         if (active) setError(loadError instanceof Error ? loadError.message : 'No se pudo cargar el contrato.')
@@ -40,6 +43,16 @@ export default function ContratoEditor() {
       })
     return () => { active = false }
   }, [id])
+
+  const handleCambioModelo = (tipo: 'general' | 'patrimonis') => {
+    setTipoModelo(tipo)
+    if (!company) return
+    if (tipo === 'general') {
+      setContent(renderContractTemplate(DEFAULT_CONTRACT_TEMPLATE, company))
+    } else {
+      setContent(renderContractTemplate(PATRIMONIS_TEMPLATE, company))
+    }
+  }
 
   async function saveDocument() {
     if (!company) return
@@ -79,23 +92,30 @@ export default function ContratoEditor() {
         <div>
           <Link to="/contratos" className="mb-3 inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-800"><ArrowLeft size={16} /> Contratos</Link>
           <h1 className="text-xl font-semibold text-slate-900">Contrato de {company.nombre}</h1>
-          <p className="mt-1 text-sm text-slate-500">Generado desde la versión {template.version} de la plantilla maestra.</p>
+          <p className="mt-1 text-sm text-slate-500">Selecciona el formato y personaliza el contrato antes de guardar o imprimir.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
+          <select
+            value={tipoModelo}
+            onChange={(e) => handleCambioModelo(e.target.value as 'general' | 'patrimonis')}
+            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none focus:border-primary-500 shadow-sm"
+          >
+            <option value="general">📄 Formato General</option>
+            <option value="patrimonis">🏛️ Patrimonis Online (CORFO)</option>
+          </select>
+
           <button type="button" onClick={() => void saveDocument()} disabled={isSaving} className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Save size={16} />{isSaving ? 'Guardando...' : 'Guardar contrato'}</button>
           <button type="button" onClick={downloadWord} className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download size={16} />Descargar Word</button>
           <button type="button" onClick={() => window.print()} className="inline-flex h-10 items-center gap-2 rounded-md bg-primary-600 px-3 text-sm font-semibold text-white hover:bg-primary-700"><Printer size={16} />Imprimir PDF</button>
         </div>
       </div>
-
       {(notice || error) && <p role={error ? 'alert' : 'status'} className={`rounded-md px-3 py-2 text-sm print:hidden ${error ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>{error || notice}</p>}
-
       <article className="contract-paper mx-auto w-full max-w-[8.5in] min-h-[11in] bg-white p-8 shadow-md sm:p-[1in] print:min-h-0 print:max-w-none print:p-0 print:shadow-none">
         <div className="mb-8 border-b border-slate-300 pb-4 text-center">
           <p className="mb-2 text-xs font-semibold tracking-wide text-slate-500">SUTRATO LIMITADA | SUTRATO WORKCOFFEE</p>
           <p className="text-xs text-slate-500">RUT 77.935.903-4</p>
         </div>
-        <ContractRichTextEditor key={id} content={content} onUpdate={setContent} />
+        <ContractRichTextEditor key={id + tipoModelo} content={content} onUpdate={setContent} />
       </article>
       <style>{`@page{size:letter;margin:1in}@media print{html,body{background:#fff!important}.contract-paper{width:auto!important;border:0!important;margin:0!important}.contract-editor-shell{border:0!important}.contract-prose{font-size:11pt!important;line-height:1.45!important}}`}</style>
     </div>
