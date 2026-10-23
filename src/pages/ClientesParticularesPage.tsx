@@ -59,12 +59,13 @@ export default function ClientesParticularesPage() {
     setMensajeError(null)
     setTimeout(() => setMensajeExito(null), 4000)
   }
+  
   const mostrarError = (msg: string) => {
     setMensajeError(msg)
     setMensajeExito(null)
     setTimeout(() => setMensajeError(null), 5000)
   }
-
+  
   const [isClienteModalOpen, setIsClienteModalOpen] = useState(false)
   const [isArriendoModalOpen, setIsArriendoModalOpen] = useState(false)
   const [isQrModalOpen, setIsQrModalOpen] = useState(false)
@@ -232,24 +233,19 @@ export default function ClientesParticularesPage() {
     window.open(url, '_blank')
   }
 
-  // 🌟 Función robusta de cálculo directo para horas y montos
   const calcularHorasYPrecios = (hIn: string, hOut: string, mod: string) => {
     if (!hIn || !hOut) return
     const hInParts = hIn.substring(0, 5)
     const hOutParts = hOut.substring(0, 5)
-
     const [hI, mI] = hInParts.split(':').map(Number)
     const [hO, mO] = hOutParts.split(':').map(Number)
-
     if (!isNaN(hI) && !isNaN(mI) && !isNaN(hO) && !isNaN(mO)) {
       const minInicio = hI * 60 + mI
       const minFin = hO * 60 + mO
       let diffMinutos = minFin - minInicio
       if (diffMinutos < 0) diffMinutos += 24 * 60
-
       const horasDecimales = diffMinutos / 60
       setHorasCalculadas(Number(horasDecimales.toFixed(2)))
-
       let calculado = 3000
       if (mod === 'Por hora') {
         const tarifaPorMinuto = 3000 / 60
@@ -284,8 +280,6 @@ export default function ClientesParticularesPage() {
     setBasesAceptadas(visita.bases_aceptadas ?? true)
     setVoucherActualUrl(visita.voucher_url || '')
     setVoucherFile(null)
-
-    // Forzamos el recálculo al seleccionar del historial
     calcularHorasYPrecios(hIn, hOut, mod)
   }
 
@@ -697,7 +691,7 @@ export default function ClientesParticularesPage() {
         </table>
       </section>
 
-      {/* MODAL QR */}
+      {/* MODAL QR CON EL FIELD_9 CORREGIDO Y OBLIGATORIO RESUELTO */}
       {isQrModalOpen && clienteQrSeleccionado && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl p-6 text-center space-y-4">
@@ -712,7 +706,7 @@ export default function ClientesParticularesPage() {
             </p>
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-center">
               <QRCodeSVG 
-                value={`https://forms.zohopublic.com/rotaryconcordia1/form/Aceptacionterminossutrato/formperma/dEiuFyNghAj8CFZhy7d5P7knBvun9DFBkH6HX0l2Bh4?zf_lang=en&Field_1=${encodeURIComponent(clienteQrSeleccionado.nombre_completo || '')}&Field_3=${encodeURIComponent(clienteQrSeleccionado.rut || '')}&Field_4=${encodeURIComponent(clienteQrSeleccionado.telefono || '')}&Field_5=${encodeURIComponent(clienteQrSeleccionado.correo || '')}&Field_6=${encodeURIComponent(clienteQrSeleccionado.empresa || '')}&Field_7=${encodeURIComponent(clienteQrSeleccionado.rut_empresa || '')}`} 
+                value={`https://forms.zohopublic.com/rotaryconcordia1/form/Aceptacionterminossutrato/formperma/dEiuFyNghAj8CFZhy7d5P7knBvun9DFBkH6HX0l2Bh4?zf_lang=en&Field_3=${encodeURIComponent(clienteQrSeleccionado.rut || '')}&Field_4=${encodeURIComponent(clienteQrSeleccionado.telefono || '')}&Field_5=${encodeURIComponent(clienteQrSeleccionado.correo || '')}&Field_6=${encodeURIComponent(clienteQrSeleccionado.nombre_completo || '')}&Field_7=${encodeURIComponent(clienteQrSeleccionado.rut_empresa || '')}&Field_9=Oficina%201`} 
                 size={180} 
               />
             </div>
