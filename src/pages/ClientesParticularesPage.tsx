@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
-import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink, CheckCircle2, AlertCircle, RefreshCw, FileUp } from 'lucide-react'
+import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink, CheckCircle2, AlertCircle, FileUp } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
 interface ClienteParticular {
@@ -12,6 +12,7 @@ interface ClienteParticular {
   empresa?: string
   rut_empresa?: string
   observaciones?: string
+  registrado_por?: string
   terminos_aceptados?: boolean
   fecha_aceptacion?: string
   zoho_enviado?: boolean
@@ -49,7 +50,6 @@ export default function ClientesParticularesPage() {
   const [clientes, setClientes] = useState<ClienteParticular[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
-  const [sincronizando, setSincronizando] = useState(false)
   
   // Estados para notificaciones corporativas flotantes (Sustrato)
   const [mensajeExito, setMensajeExito] = useState<string | null>(null)
@@ -93,6 +93,7 @@ export default function ClientesParticularesPage() {
   const [empresa, setEmpresa] = useState('')
   const [rutEmpresa, setRutEmpresa] = useState('')
   const [obsCliente, setObsCliente] = useState('')
+  const [registradoPor, setRegistradoPor] = useState('Damián')
   
   const [clienteSeleccionadoId, setClienteSeleccionadoId] = useState('')
   const [oficina, setOficina] = useState('Oficina 1')
@@ -169,7 +170,6 @@ export default function ClientesParticularesPage() {
   // TIEMPO REAL (REALTIME)
   useEffect(() => {
     fetchClientes()
-
     const channel = supabase
       .channel('public:clientes_particulares')
       .on(
@@ -180,25 +180,10 @@ export default function ClientesParticularesPage() {
         }
       )
       .subscribe()
-
     return () => {
       supabase.removeChannel(channel)
     }
   }, [])
-
-  const handleSincronizarZoho = async () => {
-    setSincronizando(true)
-    try {
-      const { data, error } = await supabase.functions.invoke('sincronizar-zoho-historico')
-      if (error) throw error
-      mostrarExito('¡Sincronización ejecutada con éxito!')
-      fetchClientes()
-    } catch (err: any) {
-      mostrarError('Error al sincronizar: ' + (err.message || 'Error desconocido'))
-    } finally {
-      setSincronizando(false)
-    }
-  }
 
   const fetchHistorialVisitas = async (clienteId: string) => {
     if (!clienteId) return
@@ -234,6 +219,7 @@ export default function ClientesParticularesPage() {
     setEmpresa('')
     setRutEmpresa('')
     setObsCliente('')
+    setRegistradoPor('Damián')
   }
 
   const resetFormularioArriendo = () => {
@@ -253,6 +239,7 @@ export default function ClientesParticularesPage() {
     setEmpresa(c.empresa || '')
     setRutEmpresa(c.rut_empresa || '')
     setObsCliente(c.observaciones || '')
+    setRegistradoPor(c.registrado_por || 'Damián')
     setIsClienteModalOpen(true)
   }
 
@@ -273,7 +260,6 @@ export default function ClientesParticularesPage() {
       mostrarError('Debes seleccionar un archivo exportado de Zoho.')
       return
     }
-
     setUploadingZohoManual(true)
     try {
       const fileExt = zohoFileManual.name.split('.').pop()
@@ -281,20 +267,16 @@ export default function ClientesParticularesPage() {
       const { error: uploadError } = await supabase.storage
         .from('vouchers')
         .upload(fileName, zohoFileManual)
-
       if (uploadError) throw uploadError
-
       const { data: publicURLData } = supabase.storage
         .from('vouchers')
         .getPublicUrl(fileName)
-
       const payloadManual = {
         archivoManualNombre: zohoFileManual.name,
         archivoUrl: publicURLData.publicUrl,
         subidoManualmente: true,
         fechaSubida: new Date().toISOString()
       }
-
       const { error: updateError } = await supabase
         .from('clientes_particulares')
         .update({
@@ -304,9 +286,7 @@ export default function ClientesParticularesPage() {
           zoho_payload: payloadManual
         })
         .eq('id', clienteUploadSeleccionado.id)
-
       if (updateError) throw updateError
-
       mostrarExito('¡Respaldo subido y cliente marcado como aceptado con éxito!')
       setIsUploadModalOpen(false)
       setClienteUploadSeleccionado(null)
@@ -451,6 +431,7 @@ export default function ClientesParticularesPage() {
       empresa,
       rut_empresa: normalizarRut(rutEmpresa),
       observaciones: obsCliente,
+      registrado_por: registradoPor,
       terminos_aceptados: false,
       zoho_enviado: false
     }
@@ -706,6 +687,11 @@ export default function ClientesParticularesPage() {
                   <td className="py-4 px-4 font-bold text-slate-900">
                     {c.nombre_completo}
                     <span className="block text-[11px] font-normal text-slate-500">{c.rut}</span>
+                    {c.registrado_por && (
+                      <span className="inline-block mt-1 text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded font-semibold">
+                        Atendido por: {c.registrado_por}
+                      </span>
+                    )}
                   </td>
                   <td className="py-4 px-4 text-slate-700">
                     {c.empresa ? (
@@ -814,6 +800,7 @@ export default function ClientesParticularesPage() {
             </div>
             <div className="text-left bg-blue-50/60 p-3 rounded-lg text-[11px] text-slate-700 space-y-1">
               <p><strong>Cliente:</strong> {clienteQrSeleccionado.nombre_completo} ({clienteQrSeleccionado.rut})</p>
+              <p><strong>Atendido por:</strong> {clienteQrSeleccionado.registrado_por || 'No especificado'}</p>
               <p><strong>Estado:</strong> <span className={clienteQrSeleccionado?.terminos_aceptados ? 'text-emerald-700 font-bold' : 'text-amber-700 font-bold'}>{clienteQrSeleccionado?.terminos_aceptados ? 'Aceptado' : 'Pendiente'}</span></p>
             </div>
             <button 
@@ -913,6 +900,22 @@ export default function ClientesParticularesPage() {
                   <input type="text" placeholder="XX.XXX.XXX-X" value={rutEmpresa} onChange={(e) => setRutEmpresa(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
                 </div>
               </div>
+
+              {/* Selector de Trabajador / Atendido Por */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Atendido / Registrado por *</label>
+                <select 
+                  value={registradoPor} 
+                  onChange={(e) => setRegistradoPor(e.target.value)} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white font-bold text-[#C5A059]"
+                  required
+                >
+                  <option value="Damián">Damián</option>
+                  <option value="Joaquín">Joaquín</option>
+                  <option value="Constanza">Constanza</option>
+                </select>
+              </div>
+
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Observaciones</label>
                 <textarea rows={3} value={obsCliente} onChange={(e) => setObsCliente(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
