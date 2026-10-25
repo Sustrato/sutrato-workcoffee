@@ -602,7 +602,7 @@ export default function ClientesParticularesPage() {
       <section className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Clientes particulares</h1>
-          <p className="mt-1 text-sm text-slate-500">Registro de personas, uso de oficinas e historial de pagos</p>
+          <p className="mt-1 text-sm text-slate-500">Registro de personas, Uso de oficinas e Historial de pagos</p>
         </div>
         <div className="flex gap-2">
           <button 
