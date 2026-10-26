@@ -116,6 +116,32 @@ export default function ClientesParticularesPage() {
   
   const [montoLiquidoCustom, setMontoLiquidoCustom] = useState(3000)
   
+  // Función para calcular el monto real de devolución aun cuando el estado sea Cancelado
+  const calcularMontoOriginal = (hIn: string, hOut: string, mod: string) => {
+    if (!hIn || !hOut) return 3000
+    const [hI, mI] = hIn.substring(0, 5).split(':').map(Number)
+    const [hO, mO] = hOut.substring(0, 5).split(':').map(Number)
+    if (!isNaN(hI) && !isNaN(mI) && !isNaN(hO) && !isNaN(mO)) {
+      const minInicio = hI * 60 + mI
+      const minFin = hO * 60 + mO
+      let diffMinutos = minFin - minInicio
+      if (diffMinutos < 0) diffMinutos += 24 * 60
+      if (mod === 'Por hora') {
+        const tarifaPorMinuto = 3000 / 60
+        return Math.round(diffMinutos * tarifaPorMinuto)
+      } else if (mod === 'Por día') {
+        return 20000
+      } else if (mod === 'Por semana') {
+        return 102000
+      } else if (mod === 'Mensual') {
+        return 350000
+      }
+    }
+    return 3000
+  }
+
+  const montoDevolucionReal = calcularMontoOriginal(horaIngreso, horaSalida, modalidad)
+
   const netoCalculado = estadoPago === 'Cancelado' ? 0 : Math.round(valorCalculado / 1.19)
   const ivaCalculado = estadoPago === 'Cancelado' ? 0 : valorCalculado - netoCalculado
   const comisionTarjetaCalculada = estadoPago === 'Cancelado' ? 0 : Math.max(0, valorCalculado - montoLiquidoCustom)
@@ -388,7 +414,6 @@ export default function ClientesParticularesPage() {
       .select('tipo_espacio')
       .eq('estado', 'Activo')
     
-    // Filtramos para ignorar los cancelados y sacarlos del calendario de disponibilidad
     const { data: reservasCruzadas } = await supabase
       .from('uso_oficinas_particulares')
       .select('id, oficina_asignada, hora_inicio, hora_fin, estado_pago')
@@ -467,7 +492,7 @@ export default function ClientesParticularesPage() {
   const handleConfirmarEliminarCliente = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!clienteAEliminar) return
-    if (confirmacionTexto.trim() !== 'ELIMINAR') {
+    if (confirmacionTexto.trim().toUpperCase() !== 'ELIMINAR') {
       mostrarError('Debes escribir la palabra exacta ELIMINAR para proceder.')
       return
     }
@@ -485,7 +510,7 @@ export default function ClientesParticularesPage() {
   const handleConfirmarEliminarVisita = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!visitaAEliminar) return
-    if (confirmacionVisitaTexto.trim() !== 'ELIMINAR') {
+    if (confirmacionVisitaTexto.trim().toUpperCase() !== 'ELIMINAR') {
       mostrarError('Debes escribir la palabra exacta ELIMINAR para proceder con el borrado del pago.')
       return
     }
@@ -967,7 +992,7 @@ export default function ClientesParticularesPage() {
                 </button>
                 <button 
                   type="submit" 
-                  disabled={confirmacionTexto.trim() !== 'ELIMINAR'}
+                  disabled={confirmacionTexto.trim().toUpperCase() !== 'ELIMINAR'}
                   className="bg-[#FB7185] hover:bg-[#F43F5E] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold px-6 py-2.5 rounded-xl shadow transition text-xs"
                 >
                   Presiona ELIMINAR
@@ -1018,7 +1043,7 @@ export default function ClientesParticularesPage() {
                 </button>
                 <button 
                   type="submit" 
-                  disabled={confirmacionVisitaTexto.trim() !== 'ELIMINAR'}
+                  disabled={confirmacionVisitaTexto.trim().toUpperCase() !== 'ELIMINAR'}
                   className="bg-[#FB7185] hover:bg-[#F43F5E] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold px-6 py-2.5 rounded-xl shadow transition text-xs"
                 >
                   Presiona ELIMINAR
@@ -1068,7 +1093,6 @@ export default function ClientesParticularesPage() {
                     <strong className="text-[#C5A059]">{totalHorasAcumuladas.toFixed(1)} hrs</strong>
                   </div>
                 </div>
-
                 {historialVisitasCliente.length > 0 && (
                   <div className="space-y-1">
                     <p className="font-bold text-slate-600 text-[10px] uppercase tracking-wider">
@@ -1250,14 +1274,17 @@ export default function ClientesParticularesPage() {
                 </div>
               </div>
 
-              {/* AVISO DE INSTRUCCIÓN SI SE SELECCIONA CANCELADO */}
+              {/* AVISO GIGANTE Y DESTACADO DE MONTO EXACTO A DEVOLVER CUANDO ESTÁ CANCELADO */}
               {estadoPago === 'Cancelado' && (
-                <div className="bg-rose-50 border border-rose-200 text-rose-900 p-4 rounded-xl space-y-1 text-xs animate-fade-in">
-                  <p className="font-bold flex items-center gap-1.5 text-rose-800">
-                    <AlertCircle size={16} /> Fuera del calendario y montos en $0:
+                <div className="bg-gradient-to-r from-rose-600 to-rose-700 text-white p-6 rounded-2xl shadow-xl space-y-2 text-center animate-fade-in border border-rose-400">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-rose-100 flex items-center justify-center gap-1.5">
+                    <AlertCircle size={18} /> MONTO EXACTO A DEVOLVER AL CLIENTE
                   </p>
-                  <p className="leading-relaxed">
-                    Al marcar como <strong>Cancelado</strong>, la oficina ha sido <strong>liberada del calendario</strong> y los montos se llevaron a <strong>$0</strong>. Recuerda realizar la transferencia de devolución al cliente ({formaPago}).
+                  <h2 className="text-4xl font-black tracking-tight drop-shadow-md">
+                    ${montoDevolucionReal.toLocaleString('es-CL')}
+                  </h2>
+                  <p className="text-xs text-rose-100 font-medium max-w-lg mx-auto leading-relaxed">
+                    Esta reserva ha sido excluida del calendario y los montos contables se fijaron en $0. Recuerda realizar la transferencia de devolución al cliente a través de <strong>{formaPago}</strong> por el valor indicado arriba.
                   </p>
                 </div>
               )}
@@ -1279,7 +1306,6 @@ export default function ClientesParticularesPage() {
                   </select>
                   <span className="text-[10px] text-slate-500 mt-0.5 block">Quién tomó la reserva o inició la visita.</span>
                 </div>
-
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Cobrado / Gestionado por</label>
                   <select 
