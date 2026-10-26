@@ -12,7 +12,6 @@ interface ClienteParticular {
   empresa?: string
   rut_empresa?: string
   observaciones?: string
-  registrado_por?: string
   terminos_aceptados?: boolean
   fecha_aceptacion?: string
   zoho_enviado?: boolean
@@ -39,6 +38,8 @@ interface UsoOficina {
   voucher_url?: string
   bases_aceptadas?: boolean
   fecha_aceptacion_bases?: string
+  iniciado_por?: string
+  cobrado_por?: string
 }
 
 const normalizarRut = (valor: string) => {
@@ -51,7 +52,6 @@ export default function ClientesParticularesPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
   
-  // Estados para notificaciones corporativas flotantes (Sustrato)
   const [mensajeExito, setMensajeExito] = useState<string | null>(null)
   const [mensajeError, setMensajeError] = useState<string | null>(null)
   
@@ -80,12 +80,12 @@ export default function ClientesParticularesPage() {
   const [editingClienteId, setEditingClienteId] = useState<string | null>(null)
   const [editingVisitaId, setEditingVisitaId] = useState<string | null>(null)
   
-  // Estados para los Modales de Eliminación Personalizados
   const [clienteAEliminar, setClienteAEliminar] = useState<ClienteParticular | null>(null)
   const [confirmacionTexto, setConfirmacionTexto] = useState('')
   const [visitaAEliminar, setVisitaAEliminar] = useState<UsoOficina | null>(null)
   const [confirmacionVisitaTexto, setConfirmacionVisitaTexto] = useState('')
   
+  // Campos del Cliente
   const [nombreCompleto, setNombreCompleto] = useState('')
   const [rut, setRut] = useState('')
   const [telefono, setTelefono] = useState('')
@@ -93,7 +93,6 @@ export default function ClientesParticularesPage() {
   const [empresa, setEmpresa] = useState('')
   const [rutEmpresa, setRutEmpresa] = useState('')
   const [obsCliente, setObsCliente] = useState('')
-  const [registradoPor, setRegistradoPor] = useState('Damián')
   
   const [clienteSeleccionadoId, setClienteSeleccionadoId] = useState('')
   const [oficina, setOficina] = useState('Oficina 1')
@@ -111,7 +110,10 @@ export default function ClientesParticularesPage() {
   const [estadoPago, setEstadoPago] = useState('Pagado')
   const [formaPago, setFormaPago] = useState('Transferencia')
   
-  // Estados Financieros
+  // Doble responsable (Cobrador nace vacío por defecto)
+  const [iniciadoPorVisita, setIniciadoPorVisita] = useState('Damián')
+  const [cobradoPorVisita, setCobradoPorVisita] = useState('')
+  
   const [montoLiquidoCustom, setMontoLiquidoCustom] = useState(3000)
   
   const netoCalculado = Math.round(valorCalculado / 1.19)
@@ -167,7 +169,6 @@ export default function ClientesParticularesPage() {
     setLoading(false)
   }
 
-  // TIEMPO REAL (REALTIME)
   useEffect(() => {
     fetchClientes()
     const channel = supabase
@@ -219,7 +220,6 @@ export default function ClientesParticularesPage() {
     setEmpresa('')
     setRutEmpresa('')
     setObsCliente('')
-    setRegistradoPor('Damián')
   }
 
   const resetFormularioArriendo = () => {
@@ -228,6 +228,8 @@ export default function ClientesParticularesPage() {
     setVoucherActualUrl('')
     setEstadoPago('Pagado')
     setFormaPago('Transferencia')
+    setIniciadoPorVisita('Damián')
+    setCobradoPorVisita('')
   }
 
   const handleAbrirEditarCliente = (c: ClienteParticular) => {
@@ -239,7 +241,6 @@ export default function ClientesParticularesPage() {
     setEmpresa(c.empresa || '')
     setRutEmpresa(c.rut_empresa || '')
     setObsCliente(c.observaciones || '')
-    setRegistradoPor(c.registrado_por || 'Damián')
     setIsClienteModalOpen(true)
   }
 
@@ -350,6 +351,8 @@ export default function ClientesParticularesPage() {
     setModalidad(mod)
     setEstadoPago(visita.estado_pago || 'Pagado')
     setFormaPago(visita.forma_pago || 'Transferencia')
+    setIniciadoPorVisita(visita.iniciado_por || 'Damián')
+    setCobradoPorVisita(visita.cobrado_por || '')
     setBasesAceptadas(visita.bases_aceptadas ?? true)
     setVoucherActualUrl(visita.voucher_url || '')
     setVoucherFile(null)
@@ -431,7 +434,6 @@ export default function ClientesParticularesPage() {
       empresa,
       rut_empresa: normalizarRut(rutEmpresa),
       observaciones: obsCliente,
-      registrado_por: registradoPor,
       terminos_aceptados: false,
       zoho_enviado: false
     }
@@ -538,6 +540,8 @@ export default function ClientesParticularesPage() {
       forma_pago: formaPago,
       bases_aceptadas: basesAceptadas,
       fecha_aceptacion_bases: fechaAceptacion,
+      iniciado_por: iniciadoPorVisita,
+      cobrado_por: cobradoPorVisita || null,
       voucher_url: finalVoucherUrl || null
     }
     let error
@@ -687,11 +691,6 @@ export default function ClientesParticularesPage() {
                   <td className="py-4 px-4 font-bold text-slate-900">
                     {c.nombre_completo}
                     <span className="block text-[11px] font-normal text-slate-500">{c.rut}</span>
-                    {c.registrado_por && (
-                      <span className="inline-block mt-1 text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded font-semibold">
-                        Atendido por: {c.registrado_por}
-                      </span>
-                    )}
                   </td>
                   <td className="py-4 px-4 text-slate-700">
                     {c.empresa ? (
@@ -800,7 +799,6 @@ export default function ClientesParticularesPage() {
             </div>
             <div className="text-left bg-blue-50/60 p-3 rounded-lg text-[11px] text-slate-700 space-y-1">
               <p><strong>Cliente:</strong> {clienteQrSeleccionado.nombre_completo} ({clienteQrSeleccionado.rut})</p>
-              <p><strong>Atendido por:</strong> {clienteQrSeleccionado.registrado_por || 'No especificado'}</p>
               <p><strong>Estado:</strong> <span className={clienteQrSeleccionado?.terminos_aceptados ? 'text-emerald-700 font-bold' : 'text-amber-700 font-bold'}>{clienteQrSeleccionado?.terminos_aceptados ? 'Aceptado' : 'Pendiente'}</span></p>
             </div>
             <button 
@@ -900,23 +898,6 @@ export default function ClientesParticularesPage() {
                   <input type="text" placeholder="XX.XXX.XXX-X" value={rutEmpresa} onChange={(e) => setRutEmpresa(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
                 </div>
               </div>
-
-              {/* Selector de Trabajador / Atendido Por (Incluye a Damián, Joaquín, Constanza y Jorge) */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Atendido / Registrado por *</label>
-                <select 
-                  value={registradoPor} 
-                  onChange={(e) => setRegistradoPor(e.target.value)} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white font-bold text-[#C5A059]"
-                  required
-                >
-                  <option value="Damián">Damián</option>
-                  <option value="Joaquín">Joaquín</option>
-                  <option value="Constanza">Constanza</option>
-                  <option value="Jorge">Jorge</option>
-                </select>
-              </div>
-
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Observaciones</label>
                 <textarea rows={3} value={obsCliente} onChange={(e) => setObsCliente(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" />
@@ -1040,7 +1021,7 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* MODAL REGISTRAR / EDITAR ARRIENDO */}
+      {/* MODAL REGISTRAR / EDITAR ARRIENDO CON DOBLE RESPONSABLE */}
       {isArriendoModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -1079,6 +1060,7 @@ export default function ClientesParticularesPage() {
                     <strong className="text-[#C5A059]">{totalHorasAcumuladas.toFixed(1)} hrs</strong>
                   </div>
                 </div>
+
                 {historialVisitasCliente.length > 0 && (
                   <div className="space-y-1">
                     <p className="font-bold text-slate-600 text-[10px] uppercase tracking-wider">
@@ -1094,7 +1076,8 @@ export default function ClientesParticularesPage() {
                             onClick={() => handleSeleccionarVisitaParaEditar(visita)} 
                             className="cursor-pointer flex-1"
                           >
-                            📅 {visita.fecha_inicio} ({visita.hora_inicio} - {visita.hora_fin}) — <strong className="text-slate-700">{visita.oficina_asignada} [{visita.horas_calculadas}h]</strong>
+                            📅 {visita.fecha_inicio} ({visita.hora_inicio} - {visita.hora_fin}) — <strong className="text-slate-700">{visita.oficina_asignada} [{visita.horas_calculadas}h]</strong> 
+                            <span className="block text-[10px] text-slate-500">Inició: {visita.iniciado_por || '—'} | Cobró: {visita.cobrado_por || 'Aún no se cobra'}</span>
                           </span>
                           <div className="flex items-center gap-2">
                             {visita.voucher_url ? (
@@ -1227,6 +1210,44 @@ export default function ClientesParticularesPage() {
                   <label className="block font-bold text-slate-700 mb-1">Horas calculadas</label>
                   <input type="number" step="0.01" value={horasCalculadas} readOnly className="w-full px-3 py-2 border border-slate-200 bg-stone-100 rounded-lg focus:outline-none font-semibold text-slate-800" />
                 </div>
+              </div>
+
+              {/* SECCIÓN DOBLE RESPONSABLE (Cobrado por nace vacío por defecto) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-amber-50/50 p-4 rounded-xl border border-amber-200">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Iniciado / Reservado por *</label>
+                  <select 
+                    value={iniciadoPorVisita} 
+                    onChange={(e) => setIniciadoPorVisita(e.target.value)} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white font-bold text-slate-800"
+                    required
+                  >
+                    <option value="Damián">Damián</option>
+                    <option value="Joaquín">Joaquín</option>
+                    <option value="Constanza">Constanza</option>
+                    <option value="Jorge">Jorge</option>
+                  </select>
+                  <span className="text-[10px] text-slate-500 mt-0.5 block">Quién tomó la reserva o inició la visita.</span>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Cobrado / Gestionado por</label>
+                  <select 
+                    value={cobradoPorVisita} 
+                    onChange={(e) => setCobradoPorVisita(e.target.value)} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white font-bold text-[#C5A059]"
+                  >
+                    <option value="">-- Sin cobrar / Pendiente (Aún no cierra) --</option>
+                    <option value="Damián">Damián</option>
+                    <option value="Joaquín">Joaquín</option>
+                    <option value="Constanza">Constanza</option>
+                    <option value="Jorge">Jorge</option>
+                  </select>
+                  <span className="text-[10px] text-slate-500 mt-0.5 block">Quién recibió el pago o cerró el comprobante.</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Monto Bruto ($)</label>
                   <input type="number" value={valorCalculado} onChange={(e) => setValorCalculado(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-extrabold text-slate-900" />
