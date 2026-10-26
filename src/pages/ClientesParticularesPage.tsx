@@ -116,9 +116,9 @@ export default function ClientesParticularesPage() {
   
   const [montoLiquidoCustom, setMontoLiquidoCustom] = useState(3000)
   
-  const netoCalculado = Math.round(valorCalculado / 1.19)
-  const ivaCalculado = valorCalculado - netoCalculado
-  const comisionTarjetaCalculada = Math.max(0, valorCalculado - montoLiquidoCustom)
+  const netoCalculado = estadoPago === 'Cancelado' ? 0 : Math.round(valorCalculado / 1.19)
+  const ivaCalculado = estadoPago === 'Cancelado' ? 0 : valorCalculado - netoCalculado
+  const comisionTarjetaCalculada = estadoPago === 'Cancelado' ? 0 : Math.max(0, valorCalculado - montoLiquidoCustom)
   
   const [voucherFile, setVoucherFile] = useState<File | null>(null)
   const [voucherActualUrl, setVoucherActualUrl] = useState<string>('')
@@ -356,7 +356,13 @@ export default function ClientesParticularesPage() {
     setBasesAceptadas(visita.bases_aceptadas ?? true)
     setVoucherActualUrl(visita.voucher_url || '')
     setVoucherFile(null)
-    calcularHorasYPrecios(hIn, hOut, mod)
+    
+    if (visita.estado_pago === 'Cancelado') {
+      setValorCalculado(0)
+      setMontoLiquidoCustom(0)
+    } else {
+      calcularHorasYPrecios(hIn, hOut, mod)
+    }
   }
 
   const handleVerVoucherSeguro = async (urlOriginal: string) => {
@@ -382,10 +388,12 @@ export default function ClientesParticularesPage() {
       .select('tipo_espacio')
       .eq('estado', 'Activo')
     
+    // Filtramos para ignorar los cancelados y sacarlos del calendario de disponibilidad
     const { data: reservasCruzadas } = await supabase
       .from('uso_oficinas_particulares')
-      .select('id, oficina_asignada, hora_inicio, hora_fin')
+      .select('id, oficina_asignada, hora_inicio, hora_fin, estado_pago')
       .eq('fecha_inicio', fechaIngreso)
+      .neq('estado_pago', 'Cancelado')
     
     const bloqueos: Record<string, string> = {}
     if (empresasActivas) {
@@ -498,7 +506,7 @@ export default function ClientesParticularesPage() {
       mostrarError('Debes aceptar las Bases y Condiciones de uso físico para guardar el arriendo.')
       return
     }
-    if (oficinasBloqueadas.includes(oficina)) {
+    if (oficinasBloqueadas.includes(oficina) && estadoPago !== 'Cancelado') {
       mostrarError(`La ${oficina} no está disponible en este horario (${detallesBloqueo[oficina]}).`)
       return
     }
@@ -530,7 +538,7 @@ export default function ClientesParticularesPage() {
       hora_inicio: horaIngreso,
       hora_fin: horaSalida,
       modalidad,
-      horas_calculadas: horasCalculadas,
+      horas_calculadas: estadoPago === 'Cancelado' ? 0 : horasCalculadas,
       monto_total: Number(valorCalculado),
       monto_neto: netoCalculado,
       iva: ivaCalculado,
@@ -1021,7 +1029,7 @@ export default function ClientesParticularesPage() {
         </div>
       )}
 
-      {/* MODAL REGISTRAR / EDITAR ARRIENDO CON DOBLE RESPONSABLE */}
+      {/* MODAL REGISTRAR / EDITAR ARRIENDO CON SALIDA DEL CALENDARIO Y DESCUENTO */}
       {isArriendoModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -1091,7 +1099,15 @@ export default function ClientesParticularesPage() {
                             ) : (
                               <span className="text-[10px] text-slate-400 italic">Sin voucher</span>
                             )}
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${visita.estado_pago === 'Pagado' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              visita.estado_pago === 'Pagado' 
+                                ? 'bg-emerald-100 text-emerald-800' 
+                                : visita.estado_pago === 'Reservado' 
+                                ? 'bg-blue-100 text-blue-800' 
+                                : visita.estado_pago === 'Cancelado'
+                                ? 'bg-rose-100 text-rose-800 line-through'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
                               {visita.estado_pago}
                             </span>
                             <button 
@@ -1146,7 +1162,9 @@ export default function ClientesParticularesPage() {
                     onChange={(e) => {
                       const nuevaMod = e.target.value
                       setModalidad(nuevaMod)
-                      calcularHorasYPrecios(horaIngreso, horaSalida, nuevaMod)
+                      if (estadoPago !== 'Cancelado') {
+                        calcularHorasYPrecios(horaIngreso, horaSalida, nuevaMod)
+                      }
                     }} 
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white"
                   >
@@ -1175,10 +1193,26 @@ export default function ClientesParticularesPage() {
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Estado del pago</label>
-                  <select value={estadoPago} onChange={(e) => setEstadoPago(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white font-bold text-amber-700">
+                  <select 
+                    value={estadoPago} 
+                    onChange={(e) => {
+                      const nuevoEstado = e.target.value
+                      setEstadoPago(nuevoEstado)
+                      if (nuevoEstado === 'Cancelado') {
+                        setValorCalculado(0)
+                        setMontoLiquidoCustom(0)
+                      } else {
+                        calcularHorasYPrecios(horaIngreso, horaSalida, modalidad)
+                      }
+                    }} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none bg-white font-bold text-amber-700"
+                  >
                     <option value="Pagado">Pagado</option>
+                    <option value="Reservado">Reservado (Anticipado)</option>
                     <option value="Pendiente">Pendiente</option>
+                    <option value="Cancelado">Cancelado (Devolución 24h)</option>
                   </select>
+                  <span className="text-[10px] text-slate-500 mt-0.5 block">⚠️ Cancelado libera la oficina y descuenta el dinero.</span>
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Hora de ingreso *</label>
@@ -1187,7 +1221,9 @@ export default function ClientesParticularesPage() {
                     value={horaIngreso} 
                     onChange={(e) => {
                       setHoraIngreso(e.target.value)
-                      calcularHorasYPrecios(e.target.value, horaSalida, modalidad)
+                      if (estadoPago !== 'Cancelado') {
+                        calcularHorasYPrecios(e.target.value, horaSalida, modalidad)
+                      }
                     }} 
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" 
                     required 
@@ -1200,7 +1236,9 @@ export default function ClientesParticularesPage() {
                     value={horaSalida} 
                     onChange={(e) => {
                       setHoraSalida(e.target.value)
-                      calcularHorasYPrecios(horaIngreso, e.target.value, modalidad)
+                      if (estadoPago !== 'Cancelado') {
+                        calcularHorasYPrecios(horaIngreso, e.target.value, modalidad)
+                      }
                     }} 
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" 
                     required 
@@ -1208,11 +1246,23 @@ export default function ClientesParticularesPage() {
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Horas calculadas</label>
-                  <input type="number" step="0.01" value={horasCalculadas} readOnly className="w-full px-3 py-2 border border-slate-200 bg-stone-100 rounded-lg focus:outline-none font-semibold text-slate-800" />
+                  <input type="number" step="0.01" value={estadoPago === 'Cancelado' ? 0 : horasCalculadas} readOnly className="w-full px-3 py-2 border border-slate-200 bg-stone-100 rounded-lg focus:outline-none font-semibold text-slate-800" />
                 </div>
               </div>
 
-              {/* SECCIÓN DOBLE RESPONSABLE (Cobrado por nace vacío por defecto) */}
+              {/* AVISO DE INSTRUCCIÓN SI SE SELECCIONA CANCELADO */}
+              {estadoPago === 'Cancelado' && (
+                <div className="bg-rose-50 border border-rose-200 text-rose-900 p-4 rounded-xl space-y-1 text-xs animate-fade-in">
+                  <p className="font-bold flex items-center gap-1.5 text-rose-800">
+                    <AlertCircle size={16} /> Fuera del calendario y montos en $0:
+                  </p>
+                  <p className="leading-relaxed">
+                    Al marcar como <strong>Cancelado</strong>, la oficina ha sido <strong>liberada del calendario</strong> y los montos se llevaron a <strong>$0</strong>. Recuerda realizar la transferencia de devolución al cliente ({formaPago}).
+                  </p>
+                </div>
+              )}
+
+              {/* SECCIÓN DOBLE RESPONSABLE */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-amber-50/50 p-4 rounded-xl border border-amber-200">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Iniciado / Reservado por *</label>

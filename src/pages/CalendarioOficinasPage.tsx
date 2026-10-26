@@ -22,14 +22,15 @@ export default function CalendarioOficinasPage() {
   const [reservaParaCancelar, setReservaParaCancelar] = useState<EventoReserva | null>(null)
   const [isCanceling, setIsCanceling] = useState(false)
 
-  // Cargar reservas desde Supabase
+  // Cargar reservas desde Supabase (FILTRANDO LAS CANCELADAS)
   const fetchReservas = async () => {
     setLoading(true)
     
-    // 1. Cargar reservas particulares
+    // 1. Cargar reservas particulares excluyendo las canceladas
     const { data: particulares } = await supabase
       .from('uso_oficinas_particulares')
-      .select('id, oficina_asignada, hora_inicio, hora_fin, fecha_inicio, clientes_particulares(nombre_completo)')
+      .select('id, oficina_asignada, hora_inicio, hora_fin, fecha_inicio, estado_pago, clientes_particulares(nombre_completo)')
+      .neq('estado_pago', 'Cancelado')
 
     // 2. Cargar arriendos mensuales de empresas activos
     const { data: empresas } = await supabase
@@ -41,27 +42,31 @@ export default function CalendarioOficinasPage() {
 
     if (particulares) {
       particulares.forEach((p: any) => {
-        listaEventos.push({
-          id: p.id,
-          oficina: p.oficina_asignada,
-          cliente: p.clientes_particulares?.nombre_completo || 'Cliente Particular',
-          horaInicio: p.hora_inicio?.substring(0, 5),
-          horaFin: p.hora_fin?.substring(0, 5),
-          tipo: 'particular',
-          fecha: p.fecha_inicio
-        })
+        if (p.fecha_inicio) {
+          listaEventos.push({
+            id: p.id,
+            oficina: p.oficina_asignada,
+            cliente: p.clientes_particulares?.nombre_completo || 'Cliente Particular',
+            horaInicio: p.hora_inicio?.substring(0, 5),
+            horaFin: p.hora_fin?.substring(0, 5),
+            tipo: 'particular',
+            fecha: p.fecha_inicio
+          })
+        }
       })
     }
 
     if (empresas) {
       empresas.forEach((e: any) => {
-        listaEventos.push({
-          id: e.id,
-          oficina: e.tipo_espacio,
-          cliente: e.nombre_cliente,
-          tipo: 'empresa',
-          fecha: e.fecha_inicio
-        })
+        if (e.fecha_inicio) {
+          listaEventos.push({
+            id: e.id,
+            oficina: e.tipo_espacio,
+            cliente: e.nombre_cliente,
+            tipo: 'empresa',
+            fecha: e.fecha_inicio
+          })
+        }
       })
     }
 
@@ -73,17 +78,23 @@ export default function CalendarioOficinasPage() {
     fetchReservas()
   }, [currentDate])
 
-  // Función que ejecuta la cancelación de forma segura en la base de datos
+  // Función que ejecuta la cancelación de forma segura y limpia en la base de datos
   const confirmarCancelacion = async () => {
     if (!reservaParaCancelar) return
     setIsCanceling(true)
-
     const { id, tipo } = reservaParaCancelar
 
     if (tipo === 'particular') {
       const { error } = await supabase
         .from('uso_oficinas_particulares')
-        .update({ fecha_inicio: null })
+        .update({ 
+          estado_pago: 'Cancelado',
+          monto_total: 0,
+          monto_neto: 0,
+          iva: 0,
+          monto_liquido: 0,
+          horas_calculadas: 0
+        })
         .eq('id', id)
 
       if (!error) {
@@ -151,7 +162,6 @@ export default function CalendarioOficinasPage() {
   })
 
   const horas = Array.from({ length: 13 }).map((_, i) => `${String(8 + i).padStart(2, '0')}:00`)
-
   const monthNames = [
     'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
     'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
@@ -170,7 +180,7 @@ export default function CalendarioOficinasPage() {
             Visualización de reservas y arriendos presenciales
           </p>
         </div>
-
+        
         {/* Switch Vista Mensual / Semanal */}
         <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold">
           <button 
@@ -236,7 +246,6 @@ export default function CalendarioOficinasPage() {
                 const dayNum = i + 1
                 const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`
                 const reservasDelDia = eventos.filter(e => e.fecha === dateStr)
-
                 return (
                   <div 
                     key={dayNum} 
@@ -296,7 +305,6 @@ export default function CalendarioOficinasPage() {
                   </div>
                 ))}
               </div>
-
               <div className="divide-y divide-slate-100">
                 {horas.map((hora) => (
                   <div key={hora} className="grid grid-cols-8 min-h-[50px]">
@@ -312,7 +320,6 @@ export default function CalendarioOficinasPage() {
                         const horaGrid = hora.split(':')[0]
                         return horaEvento === horaGrid
                       })
-
                       return (
                         <div key={idx} className="border-l border-slate-100 p-1 space-y-1 bg-slate-50/30">
                           {eventosHora.map((r) => (
@@ -347,7 +354,7 @@ export default function CalendarioOficinasPage() {
         )}
       </section>
 
-      {/* ✨ MODAL DE CONFIRMACIÓN PERSONALIZADO (Adiós al cartel feo de localhost/vercel) */}
+      {/* ✨ MODAL DE CONFIRMACIÓN PERSONALIZADO */}
       {reservaParaCancelar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-[2px]">
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl shadow-slate-950/20">
@@ -402,7 +409,6 @@ export default function CalendarioOficinasPage() {
           </div>
         </div>
       )}
-
     </div>
   )
 }
