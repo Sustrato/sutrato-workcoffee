@@ -602,7 +602,7 @@ export default function ClientesParticularesPage() {
       <section className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Clientes particulares</h1>
-          <p className="mt-1 text-sm text-slate-500">Registro de personas, Uso de oficinas e Historial de pagos</p>
+          <p className="mt-1 text-sm text-slate-500">Registro de personas, uso de oficinas e historial de pagos</p>
         </div>
         <div className="flex gap-2">
           <button 
@@ -901,7 +901,7 @@ export default function ClientesParticularesPage() {
                 </div>
               </div>
 
-              {/* Selector de Trabajador / Atendido Por */}
+              {/* Selector de Trabajador / Atendido Por (Incluye a Damián, Joaquín, Constanza y Jorge) */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Atendido / Registrado por *</label>
                 <select 
@@ -913,6 +913,7 @@ export default function ClientesParticularesPage() {
                   <option value="Damián">Damián</option>
                   <option value="Joaquín">Joaquín</option>
                   <option value="Constanza">Constanza</option>
+                  <option value="Jorge">Jorge</option>
                 </select>
               </div>
 
