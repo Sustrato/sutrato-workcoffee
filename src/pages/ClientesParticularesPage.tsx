@@ -40,6 +40,7 @@ interface UsoOficina {
   fecha_aceptacion_bases?: string
   iniciado_por?: string
   cobrado_por?: string
+  created_at?: string
 }
 
 const normalizarRut = (valor: string) => {
@@ -106,7 +107,6 @@ export default function ClientesParticularesPage() {
   const [horaIngreso, setHoraIngreso] = useState('09:00')
   const [horaSalida, setHoraSalida] = useState('10:00')
   
-  // Control para mostrar el panel de pauta horaria al hacer clic en los inputs de hora
   const [showPautaIngreso, setShowPautaIngreso] = useState(false)
   const [showPautaSalida, setShowPautaSalida] = useState(false)
   const pautaIngresoRef = useRef<HTMLDivElement>(null)
@@ -279,7 +279,7 @@ export default function ClientesParticularesPage() {
       .from('uso_oficinas_particulares')
       .select('*')
       .eq('cliente_id', clienteId)
-      .order('fecha_inicio', { ascending: false })
+      .order('created_at', { ascending: false })
     
     if (data) {
       setHistorialVisitasCliente(data)
@@ -669,6 +669,41 @@ export default function ClientesParticularesPage() {
       setIsArriendoModalOpen(false)
       resetFormularioArriendo()
       fetchHistorialVisitas(clienteSeleccionadoId)
+    }
+  }
+
+  // 🟢 CONTADOR DE 24 HORAS HASTA EL INICIO DE LA RESERVA (SOLO PARA ESTADOS "Reservado")
+  const evaluarPlazoCancelacion = (visita: UsoOficina) => {
+    if (visita.estado_pago !== 'Reservado') return null
+    if (!visita.fecha_inicio || !visita.hora_inicio) return null
+
+    const hInicioLimpia = visita.hora_inicio.substring(0, 5)
+    const fechaHoraInicioStr = `${visita.fecha_inicio}T${hInicioLimpia}:00`
+    const inicioReserva = new Date(fechaHoraInicioStr).getTime()
+    
+    if (isNaN(inicioReserva)) {
+      return { valido: false, texto: 'Fecha de inicio no válida' }
+    }
+    
+    // El límite para cancelar con devolución es exactamente 24 horas ANTES de que inicie la reserva
+    const limiteCancelacion = inicioReserva - (24 * 60 * 60 * 1000)
+    const ahora = new Date().getTime()
+    
+    const diffMs = limiteCancelacion - ahora
+    
+    if (diffMs <= 0) {
+      return { 
+        valido: false, 
+        texto: 'Sin devolución (Quedan menos de 24 horas para la reserva)' 
+      }
+    }
+    
+    const horasRestantes = Math.floor(diffMs / (1000 * 60 * 60))
+    const minutosRestantes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+    
+    return {
+      valido: true,
+      texto: `Quedan ${horasRestantes}h ${minutosRestantes}m para poder cancelar con devolución`
     }
   }
 
@@ -1202,55 +1237,70 @@ export default function ClientesParticularesPage() {
                     <p className="font-bold text-slate-600 text-[10px] uppercase tracking-wider">
                       Historial de visitas (Haz clic en una para editarla):
                     </p>
-                    <div className="max-h-32 overflow-y-auto space-y-1.5 pr-1">
-                      {historialVisitasCliente.map((visita) => (
-                        <div 
-                          key={visita.id} 
-                          className={`flex justify-between items-center bg-white px-3 py-2 rounded-lg border transition ${editingVisitaId === visita.id ? 'border-[#C5A059] bg-amber-50/60 ring-1 ring-[#C5A059]' : 'border-slate-200 hover:bg-slate-50'}`}
-                        >
-                          <span 
-                            onClick={() => handleSeleccionarVisitaParaEditar(visita)} 
-                            className="cursor-pointer flex-1"
+                    <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
+                      {historialVisitasCliente.map((visita) => {
+                        const estadoPlazo = evaluarPlazoCancelacion(visita)
+                        return (
+                          <div 
+                            key={visita.id} 
+                            className={`flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white px-3 py-2.5 rounded-lg border gap-2 transition ${editingVisitaId === visita.id ? 'border-[#C5A059] bg-amber-50/60 ring-1 ring-[#C5A059]' : 'border-slate-200 hover:bg-slate-50'}`}
                           >
-                            📅 {visita.fecha_inicio} ({visita.hora_inicio} - {visita.hora_fin}) — <strong className="text-slate-700">{visita.oficina_asignada} [{visita.horas_calculadas}h]</strong> 
-                            <span className="block text-[10px] text-slate-500">Inició: {visita.iniciado_por || '—'} | Cobró: {visita.cobrado_por || 'Aún no se cobra'}</span>
-                          </span>
-                          <div className="flex items-center gap-2">
-                            {visita.voucher_url ? (
+                            <span 
+                              onClick={() => handleSeleccionarVisitaParaEditar(visita)} 
+                              className="cursor-pointer flex-1"
+                            >
+                              📅 {visita.fecha_inicio} ({visita.hora_inicio} - {visita.hora_fin}) — <strong className="text-slate-700">{visita.oficina_asignada} [{visita.horas_calculadas}h]</strong> 
+                              <span className="block text-[10px] text-slate-500">Inició: {visita.iniciado_por || '—'} | Cobró: {visita.cobrado_por || 'Aún no se cobra'}</span>
+                            </span>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              {/* 🟢 CONTADOR DE MARGEN DE 24H ANTES DEL INICIO DE RESERVA */}
+                              {estadoPlazo && (
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[10px] font-bold ${
+                                  estadoPlazo.valido 
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                                    : 'bg-rose-100 text-rose-800 border border-rose-300'
+                                }`} title={estadoPlazo.texto}>
+                                  {estadoPlazo.valido ? `🟢 ${estadoPlazo.texto}` : `🔴 ${estadoPlazo.texto}`}
+                                </span>
+                              )}
+
+                              {visita.voucher_url ? (
+                                <button 
+                                  type="button"
+                                  onClick={() => handleVerVoucherSeguro(visita.voucher_url!)}
+                                  className="inline-flex items-center gap-1 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 px-2 py-1 rounded text-[10px] font-bold transition"
+                                >
+                                  <ExternalLink size={11} /> Voucher
+                                </button>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 italic">Sin voucher</span>
+                              )}
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                visita.estado_pago === 'Pagado' 
+                                  ? 'bg-emerald-100 text-emerald-800' 
+                                  : visita.estado_pago === 'Reservado' 
+                                  ? 'bg-blue-100 text-blue-800' 
+                                  : visita.estado_pago === 'Cancelado'
+                                  ? 'bg-rose-100 text-rose-800 line-through'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {visita.estado_pago}
+                              </span>
                               <button 
                                 type="button"
-                                onClick={() => handleVerVoucherSeguro(visita.voucher_url!)}
-                                className="inline-flex items-center gap-1 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 px-2 py-1 rounded text-[10px] font-bold transition"
+                                onClick={() => {
+                                  setVisitaAEliminar(visita)
+                                  setConfirmacionVisitaTexto('')
+                                }}
+                                className="text-rose-500 hover:text-rose-700 p-1.5 border border-rose-200 rounded-lg hover:bg-rose-50 transition"
                               >
-                                <ExternalLink size={11} /> Voucher
+                                <Trash2 size={13} />
                               </button>
-                            ) : (
-                              <span className="text-[10px] text-slate-400 italic">Sin voucher</span>
-                            )}
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              visita.estado_pago === 'Pagado' 
-                                ? 'bg-emerald-100 text-emerald-800' 
-                                : visita.estado_pago === 'Reservado' 
-                                ? 'bg-blue-100 text-blue-800' 
-                                : visita.estado_pago === 'Cancelado'
-                                ? 'bg-rose-100 text-rose-800 line-through'
-                                : 'bg-amber-100 text-amber-800'
-                            }`}>
-                              {visita.estado_pago}
-                            </span>
-                            <button 
-                              type="button"
-                              onClick={() => {
-                                setVisitaAEliminar(visita)
-                                setConfirmacionVisitaTexto('')
-                              }}
-                              className="text-rose-500 hover:text-rose-700 p-1.5 border border-rose-200 rounded-lg hover:bg-rose-50 transition"
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -1343,7 +1393,7 @@ export default function ClientesParticularesPage() {
                   <span className="text-[10px] text-slate-500 mt-0.5 block">⚠️ Cancelado libera la oficina y descuenta el dinero.</span>
                 </div>
 
-                {/* 🟢 HORA DE INGRESO: AL HACER CLIC EN EL INPUT ABRE LA PAUTA DE OCUPADOS */}
+                {/* HORA DE INGRESO */}
                 <div className="relative" ref={pautaIngresoRef}>
                   <label className="block font-bold text-slate-700 mb-1">Hora de ingreso *</label>
                   <div className="relative">
@@ -1394,7 +1444,7 @@ export default function ClientesParticularesPage() {
                   )}
                 </div>
 
-                {/* 🟢 HORA DE SALIDA: AL HACER CLIC EN EL INPUT ABRE LA PAUTA DE OCUPADOS */}
+                {/* HORA DE SALIDA */}
                 <div className="relative" ref={pautaSalidaRef}>
                   <label className="block font-bold text-slate-700 mb-1">Hora de salida *</label>
                   <div className="relative">
