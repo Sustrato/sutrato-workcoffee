@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../services/supabase'
-import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink, CheckCircle2, AlertCircle, FileUp, CheckCircle } from 'lucide-react'
+import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink, CheckCircle2, AlertCircle, FileUp, CheckCircle, Clock } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
 interface ClienteParticular {
@@ -106,6 +106,25 @@ export default function ClientesParticularesPage() {
   const [horaIngreso, setHoraIngreso] = useState('09:00')
   const [horaSalida, setHoraSalida] = useState('10:00')
   
+  // Control para mostrar el panel de pauta horaria al hacer clic en los inputs de hora
+  const [showPautaIngreso, setShowPautaIngreso] = useState(false)
+  const [showPautaSalida, setShowPautaSalida] = useState(false)
+  const pautaIngresoRef = useRef<HTMLDivElement>(null)
+  const pautaSalidaRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (pautaIngresoRef.current && !pautaIngresoRef.current.contains(event.target as Node)) {
+        setShowPautaIngreso(false)
+      }
+      if (pautaSalidaRef.current && !pautaSalidaRef.current.contains(event.target as Node)) {
+        setShowPautaSalida(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
   const [horasCalculadas, setHorasCalculadas] = useState(1)
   const [valorCalculado, setValorCalculado] = useState(3000)
   const [estadoPago, setEstadoPago] = useState('Pagado')
@@ -122,9 +141,17 @@ export default function ClientesParticularesPage() {
     'Sala de Reuniones A', 'Sala de Reuniones B'
   ]
 
-  // 🟢 BLOQUEO ESTRICTO EN TIEMPO REAL: Si está Pendiente para hoy, la oficina se marca como ocupada de inmediato
+  const [reservasDelDiaModal, setReservasDelDiaModal] = useState<any[]>([])
+
   const calcularOficinasLibres = async () => {
     const hoyStr = new Date().toISOString().split('T')[0]
+    const ahora = new Date()
+    const horaActualStr = ahora.toLocaleTimeString('es-CL', {
+      timeZone: 'America/Santiago',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    })
 
     const { data: empresasActivas } = await supabase
       .from('oficinas_fisicas')
@@ -133,7 +160,7 @@ export default function ClientesParticularesPage() {
     
     const { data: reservasHoy } = await supabase
       .from('uso_oficinas_particulares')
-      .select('oficina_asignada, estado_pago')
+      .select('oficina_asignada, hora_inicio, hora_fin, estado_pago')
       .eq('fecha_inicio', hoyStr)
       .neq('estado_pago', 'Cancelado')
 
@@ -141,9 +168,14 @@ export default function ClientesParticularesPage() {
     empresasActivas?.forEach(e => ocupadas.add(e.tipo_espacio))
     
     reservasHoy?.forEach(r => {
-      // Si está Pendiente o en curso hoy, bloquea la oficina sin importar que se haya pasado la hora
-      if (r.estado_pago === 'Pendiente' || r.estado_pago === 'Pagado' || r.estado_pago === 'Reservado') {
-        ocupadas.add(r.oficina_asignada)
+      if (r.hora_inicio && r.hora_fin) {
+        const hIn = r.hora_inicio.substring(0, 5)
+        const hOut = r.hora_fin.substring(0, 5)
+        if (r.estado_pago === 'Pendiente') {
+          if (horaActualStr >= hIn) ocupadas.add(r.oficina_asignada)
+        } else {
+          if (horaActualStr >= hIn && horaActualStr <= hOut) ocupadas.add(r.oficina_asignada)
+        }
       }
     })
 
@@ -438,7 +470,6 @@ export default function ClientesParticularesPage() {
     }
   }
 
-  // 🟢 BLOQUEO ESTRICTO EN MODAL: Si hay solapamiento O si la reserva del día está Pendiente, se bloquea la opción en el select
   const verificarDisponibilidad = async () => {
     const { data: empresasActivas } = await supabase
       .from('oficinas_fisicas')
@@ -451,6 +482,8 @@ export default function ClientesParticularesPage() {
       .eq('fecha_inicio', fechaIngreso)
       .neq('estado_pago', 'Cancelado')
     
+    setReservasDelDiaModal(reservasCruzadas || [])
+
     const bloqueos: Record<string, string> = {}
     if (empresasActivas) {
       empresasActivas.forEach(e => {
@@ -461,13 +494,17 @@ export default function ClientesParticularesPage() {
       reservasCruzadas.forEach(r => {
         if (editingVisitaId && r.id === editingVisitaId) return
         
-        // Si la reserva de ese día está en estado Pendiente, bloquea la oficina de inmediato todo el día o en su turno
-        if (r.estado_pago === 'Pendiente') {
-          bloqueos[r.oficina_asignada] = `Ocupada (Cliente aún dentro / Estado: Pendiente)`
-        } else if (r.hora_inicio && r.hora_fin) {
+        if (r.hora_inicio && r.hora_fin) {
           const rInicio = r.hora_inicio.substring(0, 5)
           const rFin = r.hora_fin.substring(0, 5)
-          const hayTraslape = horaIngreso < rFin && horaSalida > rInicio
+          
+          let hayTraslape = false
+          if (r.estado_pago === 'Pendiente') {
+            hayTraslape = horaIngreso >= rInicio && horaSalida > rInicio
+          } else {
+            hayTraslape = horaIngreso < rFin && horaSalida > rInicio
+          }
+
           if (hayTraslape) {
             bloqueos[r.oficina_asignada] = `Ocupada (${rInicio} - ${rFin} hrs / ${r.estado_pago})`
           }
@@ -647,6 +684,8 @@ export default function ClientesParticularesPage() {
   })
 
   const totalHorasAcumuladas = historialVisitasCliente.reduce((acc, curr) => acc + (Number(curr.horas_calculadas) || 0), 0)
+
+  const reservasOficinaSeleccionadaHoy = reservasDelDiaModal.filter(r => r.oficina_asignada === oficina)
 
   return (
     <div className="mx-auto max-w-7xl space-y-7 font-sans relative">
@@ -1123,7 +1162,7 @@ export default function ClientesParticularesPage() {
       {isArriendoModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="bg-[#181818] text-white px-6 py-4 flex justify-between items-center sticky top-0 z-10">
+            <div className="bg-[#181818] text-white px-6 py-4 flex justify-between items-center sticky top-0 z-20">
               <h3 className="font-bold text-base">
                 {editingVisitaId ? 'Editar registro de arriendo / pago' : 'Registrar arriendo y acumular horas de visita'}
               </h3>
@@ -1303,36 +1342,109 @@ export default function ClientesParticularesPage() {
                   </select>
                   <span className="text-[10px] text-slate-500 mt-0.5 block">⚠️ Cancelado libera la oficina y descuenta el dinero.</span>
                 </div>
-                <div>
+
+                {/* 🟢 HORA DE INGRESO: AL HACER CLIC EN EL INPUT ABRE LA PAUTA DE OCUPADOS */}
+                <div className="relative" ref={pautaIngresoRef}>
                   <label className="block font-bold text-slate-700 mb-1">Hora de ingreso *</label>
-                  <input 
-                    type="time" 
-                    value={horaIngreso} 
-                    onChange={(e) => {
-                      setHoraIngreso(e.target.value)
-                      if (estadoPago !== 'Cancelado') {
-                        calcularHorasYPrecios(e.target.value, horaSalida, modalidad)
-                      }
-                    }} 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" 
-                    required 
-                  />
+                  <div className="relative">
+                    <input 
+                      type="time" 
+                      value={horaIngreso} 
+                      onClick={() => setShowPautaIngreso(true)}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setHoraIngreso(val)
+                        if (estadoPago !== 'Cancelado') {
+                          calcularHorasYPrecios(val, horaSalida, modalidad)
+                        }
+                      }} 
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#C5A059] font-extrabold text-slate-900 bg-white cursor-pointer"
+                      required 
+                    />
+                  </div>
+
+                  {showPautaIngreso && (
+                    <div className="absolute left-0 mt-1 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 z-50 space-y-3 animate-fade-in">
+                      <div className="flex justify-between items-center border-b pb-2">
+                        <h4 className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                          <Clock size={14} className="text-[#C5A059]" /> Ocupados en {oficina}
+                        </h4>
+                        <button type="button" onClick={() => setShowPautaIngreso(false)} className="text-slate-400 hover:text-slate-700">
+                          <X size={16} />
+                        </button>
+                      </div>
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 text-xs">
+                        {reservasOficinaSeleccionadaHoy.length === 0 ? (
+                          <p className="text-emerald-700 bg-emerald-50 p-2.5 rounded-lg font-bold text-center">
+                            🟢 ¡Todo libre hoy en esta oficina!
+                          </p>
+                        ) : (
+                          reservasOficinaSeleccionadaHoy.map((r, idx) => (
+                            <div key={idx} className="bg-rose-50 border border-rose-200 text-rose-900 px-3 py-2 rounded-lg font-bold flex justify-between items-center">
+                              <span>🔴 {r.hora_inicio?.substring(0, 5)} - {r.hora_fin?.substring(0, 5)} hrs</span>
+                              <span className="text-[10px] uppercase bg-rose-200 px-1.5 py-0.5 rounded text-rose-900">Ocupado</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 text-center">
+                        Puedes escribir cualquier hora exacta (ej. 14:15) en el cuadro de texto.
+                      </p>
+                    </div>
+                  )}
                 </div>
-                <div>
+
+                {/* 🟢 HORA DE SALIDA: AL HACER CLIC EN EL INPUT ABRE LA PAUTA DE OCUPADOS */}
+                <div className="relative" ref={pautaSalidaRef}>
                   <label className="block font-bold text-slate-700 mb-1">Hora de salida *</label>
-                  <input 
-                    type="time" 
-                    value={horaSalida} 
-                    onChange={(e) => {
-                      setHoraSalida(e.target.value)
-                      if (estadoPago !== 'Cancelado') {
-                        calcularHorasYPrecios(horaIngreso, e.target.value, modalidad)
-                      }
-                    }} 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" 
-                    required 
-                  />
+                  <div className="relative">
+                    <input 
+                      type="time" 
+                      value={horaSalida} 
+                      onClick={() => setShowPautaSalida(true)}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setHoraSalida(val)
+                        if (estadoPago !== 'Cancelado') {
+                          calcularHorasYPrecios(horaIngreso, val, modalidad)
+                        }
+                      }} 
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#C5A059] font-extrabold text-slate-900 bg-white cursor-pointer"
+                      required 
+                    />
+                  </div>
+
+                  {showPautaSalida && (
+                    <div className="absolute left-0 mt-1 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 z-50 space-y-3 animate-fade-in">
+                      <div className="flex justify-between items-center border-b pb-2">
+                        <h4 className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                          <Clock size={14} className="text-[#C5A059]" /> Ocupados en {oficina}
+                        </h4>
+                        <button type="button" onClick={() => setShowPautaSalida(false)} className="text-slate-400 hover:text-slate-700">
+                          <X size={16} />
+                        </button>
+                      </div>
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 text-xs">
+                        {reservasOficinaSeleccionadaHoy.length === 0 ? (
+                          <p className="text-emerald-700 bg-emerald-50 p-2.5 rounded-lg font-bold text-center">
+                            🟢 ¡Todo libre hoy en esta oficina!
+                          </p>
+                        ) : (
+                          reservasOficinaSeleccionadaHoy.map((r, idx) => (
+                            <div key={idx} className="bg-rose-50 border border-rose-200 text-rose-900 px-3 py-2 rounded-lg font-bold flex justify-between items-center">
+                              <span>🔴 {r.hora_inicio?.substring(0, 5)} - {r.hora_fin?.substring(0, 5)} hrs</span>
+                              <span className="text-[10px] uppercase bg-rose-200 px-1.5 py-0.5 rounded text-rose-900">Ocupado</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 text-center">
+                        Puedes escribir cualquier hora exacta (ej. 16:50) en el cuadro de texto.
+                      </p>
+                    </div>
+                  )}
                 </div>
+
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Horas calculadas</label>
                   <input type="number" step="0.01" value={estadoPago === 'Cancelado' ? 0 : horasCalculadas} readOnly className="w-full px-3 py-2 border border-slate-200 bg-stone-100 rounded-lg focus:outline-none font-semibold text-slate-800" />
