@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
 import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink, CheckCircle2, AlertCircle, FileUp } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
-
 interface ClienteParticular {
   id: string
   nombre_completo: string
@@ -18,7 +17,6 @@ interface ClienteParticular {
   zoho_payload?: any
   created_at?: string
 }
-
 interface UsoOficina {
   id: string
   oficina_asignada: string
@@ -41,12 +39,10 @@ interface UsoOficina {
   iniciado_por?: string
   cobrado_por?: string
 }
-
 const normalizarRut = (valor: string) => {
   if (!valor) return ''
   return valor.toLowerCase().replace(/[\.\-\s]/g, '')
 }
-
 export default function ClientesParticularesPage() {
   const [clientes, setClientes] = useState<ClienteParticular[]>([])
   const [searchTerm, setSearchTerm] = useState('')
@@ -116,7 +112,7 @@ export default function ClientesParticularesPage() {
   
   const [montoLiquidoCustom, setMontoLiquidoCustom] = useState(3000)
   
-  // Función para calcular el monto real de devolución aun cuando el estado sea Cancelado
+  // Función para calcular el monto real de devolución con mínimo de $3.000 por hora
   const calcularMontoOriginal = (hIn: string, hOut: string, mod: string) => {
     if (!hIn || !hOut) return 3000
     const [hI, mI] = hIn.substring(0, 5).split(':').map(Number)
@@ -127,8 +123,10 @@ export default function ClientesParticularesPage() {
       let diffMinutos = minFin - minInicio
       if (diffMinutos < 0) diffMinutos += 24 * 60
       if (mod === 'Por hora') {
-        const tarifaPorMinuto = 3000 / 60
-        return Math.round(diffMinutos * tarifaPorMinuto)
+        const horasDecimales = diffMinutos / 60
+        // Mínimo 3000 aunque esté menos de 1 hora
+        const calculado = Math.round(horasDecimales * 3000)
+        return Math.max(3000, calculado)
       } else if (mod === 'Por día') {
         return 20000
       } else if (mod === 'Por semana') {
@@ -139,9 +137,7 @@ export default function ClientesParticularesPage() {
     }
     return 3000
   }
-
   const montoDevolucionReal = calcularMontoOriginal(horaIngreso, horaSalida, modalidad)
-
   const netoCalculado = estadoPago === 'Cancelado' ? 0 : Math.round(valorCalculado / 1.19)
   const ivaCalculado = estadoPago === 'Cancelado' ? 0 : valorCalculado - netoCalculado
   const comisionTarjetaCalculada = estadoPago === 'Cancelado' ? 0 : Math.max(0, valorCalculado - montoLiquidoCustom)
@@ -160,7 +156,6 @@ export default function ClientesParticularesPage() {
     'Oficina 5', 'Oficina 6', 'Oficina 7', 
     'Sala de Reuniones A', 'Sala de Reuniones B'
   ]
-
   const cargarHoraActualChile = () => {
     const ahora = new Date()
     const horaActual = ahora.toLocaleTimeString('es-CL', {
@@ -175,7 +170,6 @@ export default function ClientesParticularesPage() {
     setHoraIngreso(horaActual)
     setHoraSalida(horaSalidaCalc)
   }
-
   const fetchClientes = async () => {
     setLoading(true)
     const { data, error } = await supabase
@@ -194,7 +188,6 @@ export default function ClientesParticularesPage() {
     }
     setLoading(false)
   }
-
   useEffect(() => {
     fetchClientes()
     const channel = supabase
@@ -211,7 +204,6 @@ export default function ClientesParticularesPage() {
       supabase.removeChannel(channel)
     }
   }, [])
-
   const fetchHistorialVisitas = async (clienteId: string) => {
     if (!clienteId) return
     const { data } = await supabase
@@ -224,19 +216,16 @@ export default function ClientesParticularesPage() {
       setHistorialVisitasCliente(data)
     }
   }
-
   useEffect(() => {
     if (isArriendoModalOpen && !editingVisitaId) {
       cargarHoraActualChile()
     }
   }, [isArriendoModalOpen])
-
   useEffect(() => {
     if (clienteSeleccionadoId) {
       fetchHistorialVisitas(clienteSeleccionadoId)
     }
   }, [clienteSeleccionadoId])
-
   const resetFormularioCliente = () => {
     setEditingClienteId(null)
     setNombreCompleto('')
@@ -247,7 +236,6 @@ export default function ClientesParticularesPage() {
     setRutEmpresa('')
     setObsCliente('')
   }
-
   const resetFormularioArriendo = () => {
     setEditingVisitaId(null)
     setVoucherFile(null)
@@ -257,7 +245,6 @@ export default function ClientesParticularesPage() {
     setIniciadoPorVisita('Damián')
     setCobradoPorVisita('')
   }
-
   const handleAbrirEditarCliente = (c: ClienteParticular) => {
     setEditingClienteId(c.id)
     setNombreCompleto(c.nombre_completo || '')
@@ -269,18 +256,15 @@ export default function ClientesParticularesPage() {
     setObsCliente(c.observaciones || '')
     setIsClienteModalOpen(true)
   }
-
   const handleAbrirQr = (c: ClienteParticular) => {
     setClienteQrSeleccionado(c)
     setIsQrModalOpen(true)
   }
-
   const handleAbrirUploadManual = (c: ClienteParticular) => {
     setClienteUploadSeleccionado(c)
     setZohoFileManual(null)
     setIsUploadModalOpen(true)
   }
-
   const handleGuardarSubidaManual = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!clienteUploadSeleccionado || !zohoFileManual) {
@@ -325,7 +309,6 @@ export default function ClientesParticularesPage() {
       setUploadingZohoManual(false)
     }
   }
-
   const handleVerZohoPayload = (c: ClienteParticular) => {
     const jsonString = JSON.stringify({ cliente: c, respaldoZoho: c.zoho_payload }, null, 2)
     const blob = new Blob([jsonString], { type: 'application/json' })
@@ -333,6 +316,7 @@ export default function ClientesParticularesPage() {
     window.open(url, '_blank')
   }
 
+  // 🚀 CÁLCULO DE HORAS Y PRECIOS CON MÍNIMO DE $3.000 POR HORA
   const calcularHorasYPrecios = (hIn: string, hOut: string, mod: string) => {
     if (!hIn || !hOut) return
     const hInParts = hIn.substring(0, 5)
@@ -346,10 +330,12 @@ export default function ClientesParticularesPage() {
       if (diffMinutos < 0) diffMinutos += 24 * 60
       const horasDecimales = diffMinutos / 60
       setHorasCalculadas(Number(horasDecimales.toFixed(2)))
+      
       let calculado = 3000
       if (mod === 'Por hora') {
-        const tarifaPorMinuto = 3000 / 60
-        calculado = Math.round(diffMinutos * tarifaPorMinuto)
+        // Tarifa proporcional con mínimo estricto de $3.000
+        const prop = horasDecimales * 3000
+        calculado = Math.max(3000, Math.round(prop))
       } else if (mod === 'Por día') {
         calculado = 20000
       } else if (mod === 'Por semana') {
@@ -390,7 +376,6 @@ export default function ClientesParticularesPage() {
       calcularHorasYPrecios(hIn, hOut, mod)
     }
   }
-
   const handleVerVoucherSeguro = async (urlOriginal: string) => {
     if (!urlOriginal) return
     try {
@@ -407,7 +392,6 @@ export default function ClientesParticularesPage() {
       mostrarError('Error al abrir el voucher: ' + err.message)
     }
   }
-
   const verificarDisponibilidad = async () => {
     const { data: empresasActivas } = await supabase
       .from('oficinas_fisicas')
@@ -445,13 +429,11 @@ export default function ClientesParticularesPage() {
       if (disponible) setOficina(disponible)
     }
   }
-
   useEffect(() => {
     if (isArriendoModalOpen && horaIngreso && horaSalida) {
       verificarDisponibilidad()
     }
   }, [isArriendoModalOpen, fechaIngreso, horaIngreso, horaSalida])
-
   const handleGuardarCliente = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!nombreCompleto || !rut || !telefono || !correo) {
@@ -488,7 +470,6 @@ export default function ClientesParticularesPage() {
       fetchClientes()
     }
   }
-
   const handleConfirmarEliminarCliente = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!clienteAEliminar) return
@@ -506,7 +487,6 @@ export default function ClientesParticularesPage() {
       fetchClientes()
     }
   }
-
   const handleConfirmarEliminarVisita = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!visitaAEliminar) return
@@ -524,7 +504,6 @@ export default function ClientesParticularesPage() {
       fetchHistorialVisitas(clienteSeleccionadoId)
     }
   }
-
   const handleGuardarArriendo = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!basesAceptadas) {
@@ -595,7 +574,6 @@ export default function ClientesParticularesPage() {
       fetchHistorialVisitas(clienteSeleccionadoId)
     }
   }
-
   const queryLimpio = normalizarRut(searchTerm)
   const clientesFiltered = clientes.filter(c => {
     const nombreMatch = c.nombre_completo?.toLowerCase().includes(searchTerm.toLowerCase()) || false
@@ -606,9 +584,7 @@ export default function ClientesParticularesPage() {
     const rutMatch = queryLimpio ? (rutClienteLimpio.includes(queryLimpio) || rutEmpresaLimpio.includes(queryLimpio)) : false
     return nombreMatch || empresaMatch || correoMatch || rutMatch
   })
-
   const totalHorasAcumuladas = historialVisitasCliente.reduce((acc, curr) => acc + (Number(curr.horas_calculadas) || 0), 0)
-
   return (
     <div className="mx-auto max-w-7xl space-y-7 font-sans relative">
       
@@ -634,7 +610,6 @@ export default function ClientesParticularesPage() {
           )}
         </div>
       )}
-
       {/* Encabezado */}
       <section className="flex justify-between items-center">
         <div>
@@ -662,11 +637,10 @@ export default function ClientesParticularesPage() {
           </button>
         </div>
       </section>
-
       {/* Tarjetas de Tarifas */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm border-l-4 border-l-[#C5A059]">
-          <p className="text-xs font-semibold text-slate-400">Valor por hora</p>
+          <p className="text-xs font-semibold text-slate-400">Valor por hora (Mínimo $3.000)</p>
           <h3 className="text-2xl font-black text-slate-900 mt-1">$3.000</h3>
         </article>
         <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -682,12 +656,11 @@ export default function ClientesParticularesPage() {
           <h3 className="text-2xl font-black text-slate-900 mt-1">$350.000</h3>
         </article>
       </section>
-
       {/* Búsqueda */}
       <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-3">
         <h3 className="font-bold text-slate-900 text-sm">Registro y cálculo de uso</h3>
         <p className="text-xs text-slate-500">
-          Primero registre al cliente. Luego presione <strong>+ Uso de oficina</strong>, seleccione la modalidad y escriba la cantidad. El sistema multiplicará automáticamente la tarifa.
+          Primero registre al cliente. Luego presione <strong>+ Uso de oficina</strong>, seleccione la modalidad y escriba las horas. El sistema aplicará un mínimo de $3.000 para estancias menores o iguales a 1 hora.
         </p>
         <div className="pt-2 relative max-w-md">
           <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
@@ -700,7 +673,6 @@ export default function ClientesParticularesPage() {
           />
         </div>
       </section>
-
       {/* Listado de Clientes */}
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <table className="w-full text-left border-collapse text-xs">
@@ -810,7 +782,6 @@ export default function ClientesParticularesPage() {
           </tbody>
         </table>
       </section>
-
       {/* MODAL QR */}
       {isQrModalOpen && clienteQrSeleccionado && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
@@ -843,7 +814,6 @@ export default function ClientesParticularesPage() {
           </div>
         </div>
       )}
-
       {/* MODAL SUBIR RESPALDO ZOHO MANUALMENTE */}
       {isUploadModalOpen && clienteUploadSeleccionado && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
@@ -891,7 +861,6 @@ export default function ClientesParticularesPage() {
           </div>
         </div>
       )}
-
       {/* MODAL NUEVO / EDITAR CLIENTE */}
       {isClienteModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
@@ -951,7 +920,6 @@ export default function ClientesParticularesPage() {
           </div>
         </div>
       )}
-
       {/* MODAL ELIMINACIÓN CLIENTE */}
       {clienteAEliminar && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[999]">
@@ -1002,7 +970,6 @@ export default function ClientesParticularesPage() {
           </div>
         </div>
       )}
-
       {/* MODAL ELIMINACIÓN VISITA / PAGO */}
       {visitaAEliminar && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[999]">
@@ -1053,7 +1020,6 @@ export default function ClientesParticularesPage() {
           </div>
         </div>
       )}
-
       {/* MODAL REGISTRAR / EDITAR ARRIENDO CON SALIDA DEL CALENDARIO Y DESCUENTO */}
       {isArriendoModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
@@ -1273,7 +1239,6 @@ export default function ClientesParticularesPage() {
                   <input type="number" step="0.01" value={estadoPago === 'Cancelado' ? 0 : horasCalculadas} readOnly className="w-full px-3 py-2 border border-slate-200 bg-stone-100 rounded-lg focus:outline-none font-semibold text-slate-800" />
                 </div>
               </div>
-
               {/* AVISO GIGANTE Y DESTACADO DE MONTO EXACTO A DEVOLVER CUANDO ESTÁ CANCELADO */}
               {estadoPago === 'Cancelado' && (
                 <div className="bg-gradient-to-r from-rose-600 to-rose-700 text-white p-6 rounded-2xl shadow-xl space-y-2 text-center animate-fade-in border border-rose-400">
@@ -1288,7 +1253,6 @@ export default function ClientesParticularesPage() {
                   </p>
                 </div>
               )}
-
               {/* SECCIÓN DOBLE RESPONSABLE */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-amber-50/50 p-4 rounded-xl border border-amber-200">
                 <div>
@@ -1322,7 +1286,6 @@ export default function ClientesParticularesPage() {
                   <span className="text-[10px] text-slate-500 mt-0.5 block">Quién recibió el pago o cerró el comprobante.</span>
                 </div>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Monto Bruto ($)</label>
@@ -1333,7 +1296,6 @@ export default function ClientesParticularesPage() {
                   <input type="number" value={montoLiquidoCustom} onChange={(e) => setMontoLiquidoCustom(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-emerald-700" />
                 </div>
               </div>
-
               {/* CAJA DE CÁLCULO FINANCIERO */}
               <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
                 <div>
@@ -1357,7 +1319,6 @@ export default function ClientesParticularesPage() {
                   <p className="font-bold text-amber-700 text-xs mt-0.5">${comisionTarjetaCalculada.toLocaleString('es-CL')}</p>
                 </div>
               </div>
-
               {/* VOUCHER */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Comprobante de pago / Voucher (Archivo)</label>
@@ -1383,7 +1344,6 @@ export default function ClientesParticularesPage() {
                   />
                 </div>
               </div>
-
               {/* BASES Y CONDICIONES */}
               <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-4 space-y-3">
                 <div className="flex justify-between items-center">
@@ -1403,7 +1363,6 @@ export default function ClientesParticularesPage() {
                   </div>
                 )}
               </div>
-
               <div className="pt-2 flex justify-end gap-2">
                 <button type="button" onClick={() => { setIsArriendoModalOpen(false); resetFormularioArriendo(); }} className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700 hover:bg-slate-50 transition">
                   Cancelar
