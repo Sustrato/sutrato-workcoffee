@@ -1536,7 +1536,7 @@ export default function ClientesParticularesPage() {
                 <label className="block font-bold text-slate-700 mb-1">Comprobante de pago / Voucher (Archivo)</label>
                 {voucherActualUrl && !voucherFile && (
                   <div className="mb-2 flex items-center justify-between bg-emerald-50 border border-emerald-200 p-2 rounded-lg text-[11px]">
-                    <span className="text-emerald-800 font-medium truncate max-w-xs">📎 Voucher guardado actual</span>
+                    <span className="text-emerald-800 font-medium truncate max-w-xs">📎 Voucher Guardado <A:link></A:link>ctual</span>
                     <button type="button" onClick={() => handleVerVoucherSeguro(voucherActualUrl)} className="text-emerald-700 font-bold underline">
                       Ver archivo actual
                     </button>
