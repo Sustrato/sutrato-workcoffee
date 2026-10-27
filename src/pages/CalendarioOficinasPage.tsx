@@ -10,6 +10,7 @@ interface EventoReserva {
   horaFin?: string
   tipo: 'particular' | 'empresa'
   fecha: string
+  estadoPago?: string
 }
 
 export default function CalendarioOficinasPage() {
@@ -17,29 +18,24 @@ export default function CalendarioOficinasPage() {
   const [eventos, setEventos] = useState<EventoReserva[]>([])
   const [_loading, setLoading] = useState(false)
   const [vista, setVista] = useState<'mes' | 'semana'>('mes')
-
-  // Estados para el modal de confirmación personalizado
+  
   const [reservaParaCancelar, setReservaParaCancelar] = useState<EventoReserva | null>(null)
   const [isCanceling, setIsCanceling] = useState(false)
 
-  // Cargar reservas desde Supabase (FILTRANDO LAS CANCELADAS)
   const fetchReservas = async () => {
     setLoading(true)
     
-    // 1. Cargar reservas particulares excluyendo las canceladas
     const { data: particulares } = await supabase
       .from('uso_oficinas_particulares')
       .select('id, oficina_asignada, hora_inicio, hora_fin, fecha_inicio, estado_pago, clientes_particulares(nombre_completo)')
       .neq('estado_pago', 'Cancelado')
-
-    // 2. Cargar arriendos mensuales de empresas activos
+    
     const { data: empresas } = await supabase
       .from('oficinas_fisicas')
       .select('id, tipo_espacio, nombre_cliente, fecha_inicio, estado')
       .eq('estado', 'Activo')
 
     const listaEventos: EventoReserva[] = []
-
     if (particulares) {
       particulares.forEach((p: any) => {
         if (p.fecha_inicio) {
@@ -50,12 +46,12 @@ export default function CalendarioOficinasPage() {
             horaInicio: p.hora_inicio?.substring(0, 5),
             horaFin: p.hora_fin?.substring(0, 5),
             tipo: 'particular',
-            fecha: p.fecha_inicio
+            fecha: p.fecha_inicio,
+            estadoPago: p.estado_pago
           })
         }
       })
     }
-
     if (empresas) {
       empresas.forEach((e: any) => {
         if (e.fecha_inicio) {
@@ -69,7 +65,6 @@ export default function CalendarioOficinasPage() {
         }
       })
     }
-
     setEventos(listaEventos)
     setLoading(false)
   }
@@ -78,12 +73,10 @@ export default function CalendarioOficinasPage() {
     fetchReservas()
   }, [currentDate])
 
-  // Función que ejecuta la cancelación de forma segura y limpia en la base de datos
   const confirmarCancelacion = async () => {
     if (!reservaParaCancelar) return
     setIsCanceling(true)
     const { id, tipo } = reservaParaCancelar
-
     if (tipo === 'particular') {
       const { error } = await supabase
         .from('uso_oficinas_particulares')
@@ -96,31 +89,26 @@ export default function CalendarioOficinasPage() {
           horas_calculadas: 0
         })
         .eq('id', id)
-
       if (!error) {
         fetchReservas()
       } else {
         setEventos(prev => prev.filter(e => e.id !== id))
       }
     } else {
-      // 🏢 PARA EMPRESAS: Actualizamos a 'Cancelado' manteniendo intactos los pagos y contratos
       const { error } = await supabase
         .from('oficinas_fisicas')
         .update({ estado: 'Cancelado' })
         .eq('id', id)
-
       if (!error) {
         fetchReservas()
       } else {
         alert('Error al actualizar el estado: ' + error.message)
       }
     }
-
     setIsCanceling(false)
     setReservaParaCancelar(null)
   }
 
-  // Navegación
   const prevPeriod = () => {
     const d = new Date(currentDate)
     if (vista === 'mes') {
@@ -146,21 +134,21 @@ export default function CalendarioOficinasPage() {
   const firstDayIndex = new Date(year, month, 1).getDay()
   const totalDays = new Date(year, month + 1, 0).getDate()
   const adjustedFirstDay = (firstDayIndex + 6) % 7
-
+  
   const getStartOfWeek = (d: Date) => {
     const date = new Date(d)
     const day = date.getDay()
     const diff = date.getDate() - day + (day === 0 ? -6 : 1)
     return new Date(date.setDate(diff))
   }
-
+  
   const startOfWeek = getStartOfWeek(currentDate)
   const diasSemana = Array.from({ length: 7 }).map((_, i) => {
     const d = new Date(startOfWeek)
     d.setDate(d.getDate() + i)
     return d
   })
-
+  
   const horas = Array.from({ length: 13 }).map((_, i) => `${String(8 + i).padStart(2, '0')}:00`)
   const monthNames = [
     'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -169,19 +157,16 @@ export default function CalendarioOficinasPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 font-sans">
-      
-      {/* Encabezado */}
       <section className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
             Calendario de oficinas
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Visualización de reservas y arriendos presenciales
+            Visualización de reservas y arriendos presenciales (Incluye pendientes de cobro/salida)
           </p>
         </div>
         
-        {/* Switch Vista Mensual / Semanal */}
         <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold">
           <button 
             onClick={() => setVista('mes')}
@@ -202,10 +187,7 @@ export default function CalendarioOficinasPage() {
         </div>
       </section>
 
-      {/* Contenedor del Calendario */}
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
-        
-        {/* Header de navegación */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-4">
           <button 
             onClick={prevPeriod}
@@ -226,17 +208,10 @@ export default function CalendarioOficinasPage() {
           </button>
         </div>
 
-        {/* 📅 VISTA 1: GRID MENSUAL */}
         {vista === 'mes' ? (
           <div className="space-y-4">
             <div className="grid grid-cols-7 text-center font-bold text-xs text-slate-400">
-              <div>Lun</div>
-              <div>Mar</div>
-              <div>Mié</div>
-              <div>Jue</div>
-              <div>Vie</div>
-              <div>Sáb</div>
-              <div>Dom</div>
+              <div>Lun</div><div>Mar</div><div>Mié</div><div>Jue</div><div>Vie</div><div>Sáb</div><div>Dom</div>
             </div>
             <div className="grid grid-cols-7 gap-2">
               {Array.from({ length: adjustedFirstDay }).map((_, i) => (
@@ -257,13 +232,17 @@ export default function CalendarioOficinasPage() {
                         <div 
                           key={r.id} 
                           className={`p-1.5 rounded-lg text-[10px] font-medium border relative group transition ${
-                            r.tipo === 'particular' 
+                            r.estadoPago === 'Pendiente' 
+                              ? 'bg-amber-100 border-amber-300 text-amber-950' 
+                              : r.tipo === 'particular' 
                               ? 'bg-blue-50 border-blue-200 text-blue-900' 
                               : 'bg-amber-50 border-amber-200 text-amber-900'
                           }`}
                         >
                           <div className="flex justify-between items-start">
-                            <span className="font-bold truncate">{r.oficina}</span>
+                            <span className="font-bold truncate">
+                              {r.oficina} {r.estadoPago === 'Pendiente' && '⏳'}
+                            </span>
                             <button 
                               onClick={() => setReservaParaCancelar(r)}
                               className="text-rose-500 opacity-0 group-hover:opacity-100 hover:text-rose-700 p-0.5 transition"
@@ -272,11 +251,11 @@ export default function CalendarioOficinasPage() {
                               <Trash2 size={12} />
                             </button>
                           </div>
-                          <div className="truncate text-slate-600 flex items-center gap-0.5">
+                          <div className="truncate text-slate-700 flex items-center gap-0.5">
                             <User size={10} /> {r.cliente}
                           </div>
                           {r.horaInicio && (
-                            <div className="text-[9px] font-semibold text-blue-700 mt-0.5 flex items-center gap-0.5">
+                            <div className="text-[9px] font-semibold text-blue-800 mt-0.5 flex items-center gap-0.5">
                               <Clock size={9} /> {r.horaInicio} - {r.horaFin}
                             </div>
                           )}
@@ -289,7 +268,6 @@ export default function CalendarioOficinasPage() {
             </div>
           </div>
         ) : (
-          /* ⏱️ VISTA 2: HORARIO SEMANAL */
           <div className="overflow-x-auto">
             <div className="min-w-[800px]">
               <div className="grid grid-cols-8 border-b border-slate-200 pb-2 text-center text-xs font-bold text-slate-600">
@@ -325,7 +303,9 @@ export default function CalendarioOficinasPage() {
                           {eventosHora.map((r) => (
                             <div 
                               key={r.id}
-                              className="p-1.5 rounded-lg text-[10px] bg-blue-100 border border-blue-300 text-blue-900 shadow-sm relative group"
+                              className={`p-1.5 rounded-lg text-[10px] border shadow-sm relative group ${
+                                r.estadoPago === 'Pendiente' ? 'bg-amber-100 border-amber-300 text-amber-950' : 'bg-blue-100 border-blue-300 text-blue-900'
+                              }`}
                             >
                               <div className="flex justify-between items-center font-bold">
                                 <span className="truncate">{r.oficina}</span>
@@ -354,7 +334,6 @@ export default function CalendarioOficinasPage() {
         )}
       </section>
 
-      {/* ✨ MODAL DE CONFIRMACIÓN PERSONALIZADO */}
       {reservaParaCancelar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-[2px]">
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl shadow-slate-950/20">
@@ -386,7 +365,6 @@ export default function CalendarioOficinasPage() {
                 🔒 Tus datos financieros, pagos y contratos se mantendrán completamente seguros e intactos.
               </div>
             </div>
-
             <div className="flex flex-col-reverse gap-2.5 border-t border-slate-100 px-6 py-4 sm:flex-row sm:justify-end bg-slate-50/50">
               <button
                 type="button"

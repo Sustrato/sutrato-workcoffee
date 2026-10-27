@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
-import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink, CheckCircle2, AlertCircle, FileUp } from 'lucide-react'
+import { Plus, X, Search, Calendar, Trash2, Edit2, Upload, QrCode, Download, ExternalLink, CheckCircle2, AlertCircle, FileUp, CheckCircle } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
+
 interface ClienteParticular {
   id: string
   nombre_completo: string
@@ -17,6 +18,7 @@ interface ClienteParticular {
   zoho_payload?: any
   created_at?: string
 }
+
 interface UsoOficina {
   id: string
   oficina_asignada: string
@@ -39,14 +41,18 @@ interface UsoOficina {
   iniciado_por?: string
   cobrado_por?: string
 }
+
 const normalizarRut = (valor: string) => {
   if (!valor) return ''
   return valor.toLowerCase().replace(/[\.\-\s]/g, '')
 }
+
 export default function ClientesParticularesPage() {
   const [clientes, setClientes] = useState<ClienteParticular[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
+  
+  const [oficinasLibresAhora, setOficinasLibresAhora] = useState<string[]>([])
   
   const [mensajeExito, setMensajeExito] = useState<string | null>(null)
   const [mensajeError, setMensajeError] = useState<string | null>(null)
@@ -81,7 +87,6 @@ export default function ClientesParticularesPage() {
   const [visitaAEliminar, setVisitaAEliminar] = useState<UsoOficina | null>(null)
   const [confirmacionVisitaTexto, setConfirmacionVisitaTexto] = useState('')
   
-  // Campos del Cliente
   const [nombreCompleto, setNombreCompleto] = useState('')
   const [rut, setRut] = useState('')
   const [telefono, setTelefono] = useState('')
@@ -106,13 +111,46 @@ export default function ClientesParticularesPage() {
   const [estadoPago, setEstadoPago] = useState('Pagado')
   const [formaPago, setFormaPago] = useState('Transferencia')
   
-  // Doble responsable (Cobrador nace vacío por defecto)
   const [iniciadoPorVisita, setIniciadoPorVisita] = useState('Damián')
   const [cobradoPorVisita, setCobradoPorVisita] = useState('')
   
   const [montoLiquidoCustom, setMontoLiquidoCustom] = useState(3000)
   
-  // Función para calcular el monto real de devolución con mínimo de $3.000 por hora
+  const listaTodasOficinas = [
+    'Oficina 1', 'Oficina 2', 'Oficina 3', 'Oficina 4', 
+    'Oficina 5', 'Oficina 6', 'Oficina 7', 
+    'Sala de Reuniones A', 'Sala de Reuniones B'
+  ]
+
+  // 🟢 BLOQUEO ESTRICTO EN TIEMPO REAL: Si está Pendiente para hoy, la oficina se marca como ocupada de inmediato
+  const calcularOficinasLibres = async () => {
+    const hoyStr = new Date().toISOString().split('T')[0]
+
+    const { data: empresasActivas } = await supabase
+      .from('oficinas_fisicas')
+      .select('tipo_espacio')
+      .eq('estado', 'Activo')
+    
+    const { data: reservasHoy } = await supabase
+      .from('uso_oficinas_particulares')
+      .select('oficina_asignada, estado_pago')
+      .eq('fecha_inicio', hoyStr)
+      .neq('estado_pago', 'Cancelado')
+
+    const ocupadas = new Set<string>()
+    empresasActivas?.forEach(e => ocupadas.add(e.tipo_espacio))
+    
+    reservasHoy?.forEach(r => {
+      // Si está Pendiente o en curso hoy, bloquea la oficina sin importar que se haya pasado la hora
+      if (r.estado_pago === 'Pendiente' || r.estado_pago === 'Pagado' || r.estado_pago === 'Reservado') {
+        ocupadas.add(r.oficina_asignada)
+      }
+    })
+
+    const libres = listaTodasOficinas.filter(of => !ocupadas.has(of))
+    setOficinasLibresAhora(libres)
+  }
+
   const calcularMontoOriginal = (hIn: string, hOut: string, mod: string) => {
     if (!hIn || !hOut) return 3000
     const [hI, mI] = hIn.substring(0, 5).split(':').map(Number)
@@ -124,7 +162,6 @@ export default function ClientesParticularesPage() {
       if (diffMinutos < 0) diffMinutos += 24 * 60
       if (mod === 'Por hora') {
         const horasDecimales = diffMinutos / 60
-        // Mínimo 3000 aunque esté menos de 1 hora
         const calculado = Math.round(horasDecimales * 3000)
         return Math.max(3000, calculado)
       } else if (mod === 'Por día') {
@@ -137,6 +174,7 @@ export default function ClientesParticularesPage() {
     }
     return 3000
   }
+
   const montoDevolucionReal = calcularMontoOriginal(horaIngreso, horaSalida, modalidad)
   const netoCalculado = estadoPago === 'Cancelado' ? 0 : Math.round(valorCalculado / 1.19)
   const ivaCalculado = estadoPago === 'Cancelado' ? 0 : valorCalculado - netoCalculado
@@ -151,11 +189,6 @@ export default function ClientesParticularesPage() {
   const [oficinasBloqueadas, setOficinasBloqueadas] = useState<string[]>([])
   const [detallesBloqueo, setDetallesBloqueo] = useState<Record<string, string>>({})
   
-  const listaTodasOficinas = [
-    'Oficina 1', 'Oficina 2', 'Oficina 3', 'Oficina 4', 
-    'Oficina 5', 'Oficina 6', 'Oficina 7', 
-    'Sala de Reuniones A', 'Sala de Reuniones B'
-  ]
   const cargarHoraActualChile = () => {
     const ahora = new Date()
     const horaActual = ahora.toLocaleTimeString('es-CL', {
@@ -170,6 +203,7 @@ export default function ClientesParticularesPage() {
     setHoraIngreso(horaActual)
     setHoraSalida(horaSalidaCalc)
   }
+
   const fetchClientes = async () => {
     setLoading(true)
     const { data, error } = await supabase
@@ -187,7 +221,9 @@ export default function ClientesParticularesPage() {
       console.error('Error al cargar clientes:', error.message)
     }
     setLoading(false)
+    calcularOficinasLibres()
   }
+
   useEffect(() => {
     fetchClientes()
     const channel = supabase
@@ -204,6 +240,7 @@ export default function ClientesParticularesPage() {
       supabase.removeChannel(channel)
     }
   }, [])
+
   const fetchHistorialVisitas = async (clienteId: string) => {
     if (!clienteId) return
     const { data } = await supabase
@@ -216,16 +253,19 @@ export default function ClientesParticularesPage() {
       setHistorialVisitasCliente(data)
     }
   }
+
   useEffect(() => {
     if (isArriendoModalOpen && !editingVisitaId) {
       cargarHoraActualChile()
     }
   }, [isArriendoModalOpen])
+
   useEffect(() => {
     if (clienteSeleccionadoId) {
       fetchHistorialVisitas(clienteSeleccionadoId)
     }
   }, [clienteSeleccionadoId])
+
   const resetFormularioCliente = () => {
     setEditingClienteId(null)
     setNombreCompleto('')
@@ -236,6 +276,7 @@ export default function ClientesParticularesPage() {
     setRutEmpresa('')
     setObsCliente('')
   }
+
   const resetFormularioArriendo = () => {
     setEditingVisitaId(null)
     setVoucherFile(null)
@@ -245,6 +286,7 @@ export default function ClientesParticularesPage() {
     setIniciadoPorVisita('Damián')
     setCobradoPorVisita('')
   }
+
   const handleAbrirEditarCliente = (c: ClienteParticular) => {
     setEditingClienteId(c.id)
     setNombreCompleto(c.nombre_completo || '')
@@ -256,15 +298,18 @@ export default function ClientesParticularesPage() {
     setObsCliente(c.observaciones || '')
     setIsClienteModalOpen(true)
   }
+
   const handleAbrirQr = (c: ClienteParticular) => {
     setClienteQrSeleccionado(c)
     setIsQrModalOpen(true)
   }
+
   const handleAbrirUploadManual = (c: ClienteParticular) => {
     setClienteUploadSeleccionado(c)
     setZohoFileManual(null)
     setIsUploadModalOpen(true)
   }
+
   const handleGuardarSubidaManual = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!clienteUploadSeleccionado || !zohoFileManual) {
@@ -309,6 +354,7 @@ export default function ClientesParticularesPage() {
       setUploadingZohoManual(false)
     }
   }
+
   const handleVerZohoPayload = (c: ClienteParticular) => {
     const jsonString = JSON.stringify({ cliente: c, respaldoZoho: c.zoho_payload }, null, 2)
     const blob = new Blob([jsonString], { type: 'application/json' })
@@ -316,7 +362,6 @@ export default function ClientesParticularesPage() {
     window.open(url, '_blank')
   }
 
-  // 🚀 CÁLCULO DE HORAS Y PRECIOS CON MÍNIMO DE $3.000 POR HORA
   const calcularHorasYPrecios = (hIn: string, hOut: string, mod: string) => {
     if (!hIn || !hOut) return
     const hInParts = hIn.substring(0, 5)
@@ -333,7 +378,6 @@ export default function ClientesParticularesPage() {
       
       let calculado = 3000
       if (mod === 'Por hora') {
-        // Tarifa proporcional con mínimo estricto de $3.000
         const prop = horasDecimales * 3000
         calculado = Math.max(3000, Math.round(prop))
       } else if (mod === 'Por día') {
@@ -376,6 +420,7 @@ export default function ClientesParticularesPage() {
       calcularHorasYPrecios(hIn, hOut, mod)
     }
   }
+
   const handleVerVoucherSeguro = async (urlOriginal: string) => {
     if (!urlOriginal) return
     try {
@@ -392,6 +437,8 @@ export default function ClientesParticularesPage() {
       mostrarError('Error al abrir el voucher: ' + err.message)
     }
   }
+
+  // 🟢 BLOQUEO ESTRICTO EN MODAL: Si hay solapamiento O si la reserva del día está Pendiente, se bloquea la opción en el select
   const verificarDisponibilidad = async () => {
     const { data: empresasActivas } = await supabase
       .from('oficinas_fisicas')
@@ -413,10 +460,16 @@ export default function ClientesParticularesPage() {
     if (reservasCruzadas) {
       reservasCruzadas.forEach(r => {
         if (editingVisitaId && r.id === editingVisitaId) return
-        if (r.hora_inicio && r.hora_fin) {
-          const hayTraslape = horaIngreso < r.hora_fin && horaSalida > r.hora_inicio
+        
+        // Si la reserva de ese día está en estado Pendiente, bloquea la oficina de inmediato todo el día o en su turno
+        if (r.estado_pago === 'Pendiente') {
+          bloqueos[r.oficina_asignada] = `Ocupada (Cliente aún dentro / Estado: Pendiente)`
+        } else if (r.hora_inicio && r.hora_fin) {
+          const rInicio = r.hora_inicio.substring(0, 5)
+          const rFin = r.hora_fin.substring(0, 5)
+          const hayTraslape = horaIngreso < rFin && horaSalida > rInicio
           if (hayTraslape) {
-            bloqueos[r.oficina_asignada] = `Ocupada hasta las ${r.hora_fin.substring(0, 5)} hrs`
+            bloqueos[r.oficina_asignada] = `Ocupada (${rInicio} - ${rFin} hrs / ${r.estado_pago})`
           }
         }
       })
@@ -429,11 +482,13 @@ export default function ClientesParticularesPage() {
       if (disponible) setOficina(disponible)
     }
   }
+
   useEffect(() => {
     if (isArriendoModalOpen && horaIngreso && horaSalida) {
       verificarDisponibilidad()
     }
   }, [isArriendoModalOpen, fechaIngreso, horaIngreso, horaSalida])
+
   const handleGuardarCliente = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!nombreCompleto || !rut || !telefono || !correo) {
@@ -470,6 +525,7 @@ export default function ClientesParticularesPage() {
       fetchClientes()
     }
   }
+
   const handleConfirmarEliminarCliente = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!clienteAEliminar) return
@@ -487,6 +543,7 @@ export default function ClientesParticularesPage() {
       fetchClientes()
     }
   }
+
   const handleConfirmarEliminarVisita = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!visitaAEliminar) return
@@ -504,6 +561,7 @@ export default function ClientesParticularesPage() {
       fetchHistorialVisitas(clienteSeleccionadoId)
     }
   }
+
   const handleGuardarArriendo = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!basesAceptadas) {
@@ -534,6 +592,7 @@ export default function ClientesParticularesPage() {
         .getPublicUrl(filePath)
       finalVoucherUrl = publicURLData.publicUrl
     }
+
     const payloadArriendo: any = {
       cliente_id: clienteSeleccionadoId,
       oficina_asignada: oficina,
@@ -556,6 +615,7 @@ export default function ClientesParticularesPage() {
       cobrado_por: cobradoPorVisita || null,
       voucher_url: finalVoucherUrl || null
     }
+
     let error
     if (editingVisitaId) {
       const res = await supabase.from('uso_oficinas_particulares').update(payloadArriendo).eq('id', editingVisitaId)
@@ -574,6 +634,7 @@ export default function ClientesParticularesPage() {
       fetchHistorialVisitas(clienteSeleccionadoId)
     }
   }
+
   const queryLimpio = normalizarRut(searchTerm)
   const clientesFiltered = clientes.filter(c => {
     const nombreMatch = c.nombre_completo?.toLowerCase().includes(searchTerm.toLowerCase()) || false
@@ -584,7 +645,9 @@ export default function ClientesParticularesPage() {
     const rutMatch = queryLimpio ? (rutClienteLimpio.includes(queryLimpio) || rutEmpresaLimpio.includes(queryLimpio)) : false
     return nombreMatch || empresaMatch || correoMatch || rutMatch
   })
+
   const totalHorasAcumuladas = historialVisitasCliente.reduce((acc, curr) => acc + (Number(curr.horas_calculadas) || 0), 0)
+
   return (
     <div className="mx-auto max-w-7xl space-y-7 font-sans relative">
       
@@ -610,6 +673,7 @@ export default function ClientesParticularesPage() {
           )}
         </div>
       )}
+
       {/* Encabezado */}
       <section className="flex justify-between items-center">
         <div>
@@ -637,6 +701,33 @@ export default function ClientesParticularesPage() {
           </button>
         </div>
       </section>
+
+      {/* BARRA SUPERIOR: OFICINAS LIBRES EN TIEMPO REAL */}
+      <section className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="flex size-9 items-center justify-center rounded-xl bg-emerald-600 text-white shrink-0">
+            <CheckCircle size={20} />
+          </span>
+          <div>
+            <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-wide">Oficinas y Salas Disponibles en este Momento</h4>
+            <p className="text-[11px] text-emerald-700">Espacios listos para asignación presencial inmediata hoy.</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {oficinasLibresAhora.length === 0 ? (
+            <span className="text-xs font-bold text-rose-700 bg-rose-100 px-3 py-1 rounded-lg border border-rose-200">
+              ⚠️ Todas las oficinas están ocupadas ahora
+            </span>
+          ) : (
+            oficinasLibresAhora.map(of => (
+              <span key={of} className="bg-white border border-emerald-300 text-emerald-900 px-2.5 py-1 rounded-lg text-xs font-bold shadow-2xs">
+                🟢 {of}
+              </span>
+            ))
+          )}
+        </div>
+      </section>
+
       {/* Tarjetas de Tarifas */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm border-l-4 border-l-[#C5A059]">
@@ -656,6 +747,7 @@ export default function ClientesParticularesPage() {
           <h3 className="text-2xl font-black text-slate-900 mt-1">$350.000</h3>
         </article>
       </section>
+
       {/* Búsqueda */}
       <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-3">
         <h3 className="font-bold text-slate-900 text-sm">Registro y cálculo de uso</h3>
@@ -673,6 +765,7 @@ export default function ClientesParticularesPage() {
           />
         </div>
       </section>
+
       {/* Listado de Clientes */}
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <table className="w-full text-left border-collapse text-xs">
@@ -782,6 +875,7 @@ export default function ClientesParticularesPage() {
           </tbody>
         </table>
       </section>
+
       {/* MODAL QR */}
       {isQrModalOpen && clienteQrSeleccionado && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
@@ -814,6 +908,7 @@ export default function ClientesParticularesPage() {
           </div>
         </div>
       )}
+
       {/* MODAL SUBIR RESPALDO ZOHO MANUALMENTE */}
       {isUploadModalOpen && clienteUploadSeleccionado && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
@@ -861,6 +956,7 @@ export default function ClientesParticularesPage() {
           </div>
         </div>
       )}
+
       {/* MODAL NUEVO / EDITAR CLIENTE */}
       {isClienteModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
@@ -920,6 +1016,7 @@ export default function ClientesParticularesPage() {
           </div>
         </div>
       )}
+
       {/* MODAL ELIMINACIÓN CLIENTE */}
       {clienteAEliminar && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[999]">
@@ -970,6 +1067,7 @@ export default function ClientesParticularesPage() {
           </div>
         </div>
       )}
+
       {/* MODAL ELIMINACIÓN VISITA / PAGO */}
       {visitaAEliminar && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[999]">
@@ -1020,7 +1118,8 @@ export default function ClientesParticularesPage() {
           </div>
         </div>
       )}
-      {/* MODAL REGISTRAR / EDITAR ARRIENDO CON SALIDA DEL CALENDARIO Y DESCUENTO */}
+
+      {/* MODAL REGISTRAR / EDITAR ARRIENDO */}
       {isArriendoModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -1138,7 +1237,7 @@ export default function ClientesParticularesPage() {
                       const estaBloqueada = oficinasBloqueadas.includes(of)
                       const motivo = detallesBloqueo[of]
                       return (
-                        <option key={of} value={of} disabled={estaBloqueada} className={estaBloqueada ? 'text-slate-400 bg-slate-100' : ''}>
+                        <option key={of} value={of} disabled={estaBloqueada} className={estaBloqueada ? 'text-slate-400 bg-slate-100 font-semibold' : ''}>
                           {of} {estaBloqueada ? `— (${motivo})` : ''}
                         </option>
                       )
@@ -1199,7 +1298,7 @@ export default function ClientesParticularesPage() {
                   >
                     <option value="Pagado">Pagado</option>
                     <option value="Reservado">Reservado (Anticipado)</option>
-                    <option value="Pendiente">Pendiente</option>
+                    <option value="Pendiente">Pendiente (Bloquea espacio)</option>
                     <option value="Cancelado">Cancelado (Devolución 24h)</option>
                   </select>
                   <span className="text-[10px] text-slate-500 mt-0.5 block">⚠️ Cancelado libera la oficina y descuenta el dinero.</span>
@@ -1239,7 +1338,7 @@ export default function ClientesParticularesPage() {
                   <input type="number" step="0.01" value={estadoPago === 'Cancelado' ? 0 : horasCalculadas} readOnly className="w-full px-3 py-2 border border-slate-200 bg-stone-100 rounded-lg focus:outline-none font-semibold text-slate-800" />
                 </div>
               </div>
-              {/* AVISO GIGANTE Y DESTACADO DE MONTO EXACTO A DEVOLVER CUANDO ESTÁ CANCELADO */}
+
               {estadoPago === 'Cancelado' && (
                 <div className="bg-gradient-to-r from-rose-600 to-rose-700 text-white p-6 rounded-2xl shadow-xl space-y-2 text-center animate-fade-in border border-rose-400">
                   <p className="text-[11px] font-bold uppercase tracking-widest text-rose-100 flex items-center justify-center gap-1.5">
@@ -1253,7 +1352,7 @@ export default function ClientesParticularesPage() {
                   </p>
                 </div>
               )}
-              {/* SECCIÓN DOBLE RESPONSABLE */}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-amber-50/50 p-4 rounded-xl border border-amber-200">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Iniciado / Reservado por *</label>
@@ -1286,6 +1385,7 @@ export default function ClientesParticularesPage() {
                   <span className="text-[10px] text-slate-500 mt-0.5 block">Quién recibió el pago o cerró el comprobante.</span>
                 </div>
               </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Monto Bruto ($)</label>
@@ -1296,7 +1396,7 @@ export default function ClientesParticularesPage() {
                   <input type="number" value={montoLiquidoCustom} onChange={(e) => setMontoLiquidoCustom(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-emerald-700" />
                 </div>
               </div>
-              {/* CAJA DE CÁLCULO FINANCIERO */}
+
               <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
                 <div>
                   <p className="text-[10px] font-semibold text-slate-500">Monto bruto</p>
@@ -1319,7 +1419,7 @@ export default function ClientesParticularesPage() {
                   <p className="font-bold text-amber-700 text-xs mt-0.5">${comisionTarjetaCalculada.toLocaleString('es-CL')}</p>
                 </div>
               </div>
-              {/* VOUCHER */}
+
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Comprobante de pago / Voucher (Archivo)</label>
                 {voucherActualUrl && !voucherFile && (
@@ -1344,7 +1444,7 @@ export default function ClientesParticularesPage() {
                   />
                 </div>
               </div>
-              {/* BASES Y CONDICIONES */}
+
               <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-4 space-y-3">
                 <div className="flex justify-between items-center">
                   <h4 className="font-bold text-slate-900 flex items-center gap-2">
@@ -1363,6 +1463,7 @@ export default function ClientesParticularesPage() {
                   </div>
                 )}
               </div>
+
               <div className="pt-2 flex justify-end gap-2">
                 <button type="button" onClick={() => { setIsArriendoModalOpen(false); resetFormularioArriendo(); }} className="px-4 py-2 border border-slate-300 rounded-lg font-bold text-slate-700 hover:bg-slate-50 transition">
                   Cancelar
