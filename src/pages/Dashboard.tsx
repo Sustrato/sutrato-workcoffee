@@ -334,7 +334,7 @@ export default function Dashboard() {
               <FileWarning size={20} />
             </span>
             <span>
-              <span className="block text-sm font-semibold text-slate-900">Cese de arriendos SII</span>
+              <span className="block text-sm font-semibold text-slate-900">Cese de Arriendos SII</span>
               <span className="mt-1 block text-sm text-slate-500">Generar petición para empresas no vigentes</span>
             </span>
           </span>
