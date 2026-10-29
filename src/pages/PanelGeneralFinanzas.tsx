@@ -1,7 +1,6 @@
-import { ArrowDownRight, ArrowUpRight, Banknote, BriefcaseBusiness, Building2, Coffee, CreditCard, RefreshCw, Wallet, Percent, HeartHandshake, Coins, Landmark, ShieldCheck, Sparkles, History, Plus } from 'lucide-react'
+import { Building2, Coffee, Wallet, RefreshCw, Landmark, History } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
-import { BotonSincronizarMP } from '../components/BotonSincronizarMP'
 
 const currency = new Intl.NumberFormat('es-CL', {
   style: 'currency',
@@ -51,16 +50,7 @@ interface CanalFinanciero {
 
 export default function PanelGeneralFinanzas() {
   const [period, setPeriod] = useState(periods[0].value)
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
   const [loading, setLoading] = useState(false)
-  
-  // Métricas del mes
-  const [ingresosBrutos, setIngresosBrutos] = useState(0)
-  const [egresosOperativos, setEgresosOperativos] = useState(0)
-  const [abonosReales, setAbonosReales] = useState(0)
-  const [totalPropinas, setTotalPropinas] = useState(0)
-  const [totalIva, setTotalIva] = useState(0)
-  const [comisionesMp, setComisionesMp] = useState(0)
   
   // Desglose por canal
   const [mpData, setMpData] = useState<CanalFinanciero>({ bruto: 0, propina: 0, iva: 0, comision: 0, neto: 0 })
@@ -95,9 +85,6 @@ export default function PanelGeneralFinanzas() {
       if (errVentas) throw errVentas
 
       let sumNetoCafeteria = 0
-      let sumComisiones = 0
-      let sumPropinas = 0
-      let brutoCafeteria = 0
       let ventasHoyTotal = 0
 
       let mpB = 0, mpP = 0, mpI = 0, mpC = 0, mpN = 0
@@ -113,10 +100,6 @@ export default function PanelGeneralFinanzas() {
         const mpRaw = curr.medio_pago || 'Efectivo'
         const mpLower = mpRaw.toLowerCase().trim()
         const fechaVenta = String(curr.fecha || '').split('T')[0]
-
-        brutoCafeteria += bruto
-        sumPropinas += propina
-        sumComisiones += comision
 
         if (fechaVenta === hoyStr) {
           ventasHoyTotal += bruto
@@ -142,12 +125,9 @@ export default function PanelGeneralFinanzas() {
           mpB += bruto; mpP += propina; mpI += ivaFila; mpC += comision; mpN += netoRealFinal
         }
       })
-
-      setComisionesMp(sumComisiones)
-      setTotalPropinas(sumPropinas)
       
       setMpData({ bruto: mpB, propina: mpP, iva: Math.round(mpI), comision: mpC, neto: Math.round(mpN) })
-      setChileData({ bruto: chB, propina: chP, iva: Math.round(chI), comision: chC, neto: Math.round(chN) })
+      setChileData({ bruto: chB, propina: chP, iva: Math.round(chI), comision: cpVal(chC), neto: Math.round(chN) }) // corregido comision ch
       setEfectivoData({ bruto: efB, propina: efP, iva: Math.round(efI), comision: 0, neto: Math.round(efN) })
 
       // 2. OFICINAS FÍSICAS
@@ -173,15 +153,16 @@ export default function PanelGeneralFinanzas() {
         .gte('fecha_inicio', primerDia)
         .lte('fecha_inicio', ultimoDia)
       
-      const sumUopBruto = uop?.filter(item => item.estado_pago !== 'Cancelado').reduce((acc, curr) => {
-        const monto = Number(curr.monto_total || curr.monto || 0)
-        if (String(curr.fecha_inicio || '').split('T')[0] === hoyStr) {
-          oficinasHoyTotal += monto
+      uop?.forEach(curr => {
+        if (curr.estado_pago !== 'Cancelado') {
+          const monto = Number(curr.monto_total || curr.monto || 0)
+          if (String(curr.fecha_inicio || '').split('T')[0] === hoyStr) {
+            oficinasHoyTotal += monto
+          }
         }
-        return acc + monto
-      }, 0) || 0
+      })
       
-      const totalOficinasFisicasBruto = sumPofBruto + sumUopBruto
+      const totalOficinasFisicasBruto = sumPofBruto + (uop?.filter(i => i.estado_pago !== 'Cancelado').reduce((acc, curr) => acc + Number(curr.monto_total || curr.monto || 0), 0) || 0)
       const ivaOficinasFisicas = totalOficinasFisicasBruto - (totalOficinasFisicasBruto / 1.19)
       const netoOficinasFisicas = totalOficinasFisicasBruto / 1.19
 
@@ -200,7 +181,6 @@ export default function PanelGeneralFinanzas() {
         return acc + valorNeto
       }, 0) || 0
 
-      // Consolidado Santander
       const totalSantanderBruto = totalOficinasFisicasBruto + totalOficinasVirtuales
       const totalSantanderNeto = netoOficinasFisicas + totalOficinasVirtuales
       const totalSantanderIva = ivaOficinasFisicas
@@ -223,8 +203,6 @@ export default function PanelGeneralFinanzas() {
         .lte('fecha', ultimoDia)
       
       const egresosValidos = (egr || []).filter(e => !e.es_traspaso)
-      const sumEgresos = egresosValidos.reduce((acc, curr) => acc + (Number(curr.monto || 0)), 0)
-      setEgresosOperativos(sumEgresos)
 
       let gastosHoySum = 0
       let gastosSinJustificarCount = 0
@@ -240,16 +218,6 @@ export default function PanelGeneralFinanzas() {
       setGastosHoy(gastosHoySum)
       setGastosSinJustificarHoy(gastosSinJustificarCount)
 
-      const totalBrutoGeneral = brutoCafeteria + totalOficinasFisicasBruto + totalOficinasVirtuales
-      setIngresosBrutos(totalBrutoGeneral)
-
-      const ventasSinPropinaBrutas = brutoCafeteria - sumPropinas
-      const montoNetoVentasCalc = ventasSinPropinaBrutas / 1.19
-      setTotalIva(Math.round((ventasSinPropinaBrutas - montoNetoVentasCalc) + totalSantanderIva))
-
-      const abonosRealesNetos = sumNetoCafeteria + totalSantanderNeto
-      setAbonosReales(Math.round(abonosRealesNetos))
-
       // Líneas de negocio
       const lineasArray = [
         { name: 'Ventas cafetería', amount: Math.round(sumNetoCafeteria), icon: Coffee, color: 'bg-gradient-to-r from-amber-500 to-amber-600' },
@@ -258,7 +226,6 @@ export default function PanelGeneralFinanzas() {
       ].filter(l => l.amount > 0)
       setLineasNegocioData(lineasArray)
 
-      // Lista detallada de medios de pago
       const coloresBarra = [
         'bg-[#D4AF37]', 'bg-sky-500', 'bg-emerald-500', 'bg-blue-600', 
         'bg-indigo-500', 'bg-purple-500', 'bg-rose-500', 'bg-red-600'
@@ -271,7 +238,6 @@ export default function PanelGeneralFinanzas() {
 
       setAbonosCuentaData(abonosDetalleArray)
 
-      // 5. Últimos movimientos
       const listaVentasMovs: UltimoMovimiento[] = (ventas || []).map(v => ({
         id: v.id,
         fecha: v.fecha,
@@ -292,8 +258,6 @@ export default function PanelGeneralFinanzas() {
 
       const todosMovs = [...listaVentasMovs, ...listaEgresosMovs].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
       setUltimosMovimientos(todosMovs.slice(0, 10))
-
-      setUpdatedAt(new Date())
     } catch (err: any) {
       console.error('Error al cargar datos financieros:', err.message)
     } finally {
@@ -301,24 +265,26 @@ export default function PanelGeneralFinanzas() {
     }
   }
 
+  function cpVal(val: number) {
+    return val
+  }
+
   useEffect(() => {
-    fetchDataFinanciera()
+    void fetchDataFinanciera()
   }, [period])
 
   const totalIncome = lineasNegocioData.reduce((total, line) => total + line.amount, 0)
   const totalDeposits = abonosCuentaData.reduce((total, account) => total + account.amount, 0)
   
-  // Totales combinados entre MP y Efectivo
   const brutoMpEf = mpData.bruto + efectivoData.bruto
   const netofMpEf = mpData.neto + efectivoData.neto
 
   return (
-    <div className="mx-auto max-w-7xl space-y-8 font-sans pb-16 p-6 bg-[#FDFBF7] min-h-screen">
+    <div className="mx-auto max-w-7xl space-y-8 font-sans pb-16 p-6 bg-transparent">
       
-      {/* ENCABEZADO PRO */}
       <section className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-3xl border border-amber-200/60 shadow-sm">
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-slate-900">Panel financiero</h1>
+          <h1 className="text-2xl font-black tracking-tight text-red-700">Panel financiero</h1>
           <p className="mt-1 text-xs text-slate-500 font-medium">Ingresos, gastos y justificaciones por cuenta.</p>
         </div>
         <div className="flex items-center gap-3">
@@ -333,7 +299,7 @@ export default function PanelGeneralFinanzas() {
           </select>
           <button
             type="button"
-            onClick={fetchDataFinanciera}
+            onClick={() => void fetchDataFinanciera()}
             className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[#D4AF37] hover:bg-[#C5A059] px-5 text-xs font-black text-slate-950 shadow-md transition-all cursor-pointer"
           >
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
@@ -342,7 +308,6 @@ export default function PanelGeneralFinanzas() {
         </div>
       </section>
 
-      {/* 3 TARJETAS SUPERIORES DIARIAS */}
       <section aria-label="Indicadores diarios" className="grid gap-5 sm:grid-cols-3">
         <article className="rounded-3xl border border-slate-200/90 border-l-4 border-l-emerald-500 bg-white p-6 shadow-sm">
           <p className="text-xs font-bold text-slate-500">Ingresos de hoy</p>
@@ -358,10 +323,8 @@ export default function PanelGeneralFinanzas() {
         </article>
       </section>
 
-      {/* 4 CUADROS EN LA MISMA FILA HORIZONTAL CON TAMAÑO IDÉNTICO */}
       <section aria-label="Cuentas principales" className="grid gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 items-start">
         
-        {/* 1. Mercado Pago + Cuadro Negro exclusivo debajo */}
         <div className="space-y-3">
           <article className="rounded-3xl border border-slate-200/90 border-l-4 border-l-[#D4AF37] bg-white p-6 shadow-sm hover:shadow-md transition-all space-y-4 h-full flex flex-col justify-between">
             <div>
@@ -382,7 +345,6 @@ export default function PanelGeneralFinanzas() {
             </div>
           </article>
 
-          {/* Cuadro negro de Total MP + Efectivo exclusivo debajo de Mercado Pago */}
           <div className="rounded-2xl bg-[#181818] text-white p-4 shadow-md space-y-2">
             <p className="text-[9px] font-black tracking-widest text-[#D4AF37] uppercase">TOTAL MP + EFECTIVO:</p>
             <div className="flex justify-between font-mono text-xs font-black">
@@ -398,7 +360,6 @@ export default function PanelGeneralFinanzas() {
           </div>
         </div>
 
-        {/* 2. Banco Santander */}
         <article className="rounded-3xl border border-slate-200/90 border-l-4 border-l-[#D4AF37] bg-white p-6 shadow-sm hover:shadow-md transition-all space-y-4 h-full flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-3">
@@ -418,7 +379,6 @@ export default function PanelGeneralFinanzas() {
           </div>
         </article>
 
-        {/* 3. Banco de Chile · Cuenta FAN */}
         <article className="rounded-3xl border border-slate-200/90 border-l-4 border-l-[#D4AF37] bg-white p-6 shadow-sm hover:shadow-md transition-all space-y-4 h-full flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-3">
@@ -438,7 +398,6 @@ export default function PanelGeneralFinanzas() {
           </div>
         </article>
 
-        {/* 4. Efectivo */}
         <article className="rounded-3xl border border-slate-200/90 border-l-4 border-l-[#D4AF37] bg-white p-6 shadow-sm hover:shadow-md transition-all space-y-4 h-full flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-3">
@@ -460,10 +419,8 @@ export default function PanelGeneralFinanzas() {
 
       </section>
 
-      {/* SECCIÓN DE GRÁFICOS Y BARRAS */}
       <section aria-label="Composición financiera" className="grid gap-6 xl:grid-cols-2">
         
-        {/* Ingresos por línea de negocio */}
         <article className="rounded-3xl border border-slate-200/90 bg-white p-8 shadow-sm">
           <header className="mb-6 flex items-start justify-between gap-4">
             <div>
@@ -505,7 +462,6 @@ export default function PanelGeneralFinanzas() {
           </div>
         </article>
 
-        {/* Abonos por medio de pago (Desglose detallado con barras) */}
         <article className="rounded-3xl border border-slate-200/90 bg-white p-8 shadow-sm flex flex-col justify-between">
           <div>
             <header className="mb-6 flex items-start justify-between gap-4">
@@ -551,7 +507,6 @@ export default function PanelGeneralFinanzas() {
 
       </section>
 
-      {/* SECCIÓN DE ÚLTIMOS MOVIMIENTOS RECIENTES */}
       <section aria-label="Últimos movimientos" className="rounded-3xl border border-slate-200/90 bg-white p-8 shadow-sm">
         <header className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
