@@ -31,7 +31,7 @@ export default function ReportesPage() {
       .from('oficinas_fisicas')
       .select('*')
       
-    // 2. Obtener clientes particulares (incluyendo campos financieros si existen)
+    // 2. Obtener clientes particulares
     const { data: particulares } = await supabase
       .from('uso_oficinas_particulares')
       .select('*, clientes_particulares(nombre_completo, rut)')
@@ -106,23 +106,24 @@ export default function ReportesPage() {
       item.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.rut.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.frecuencia.toLowerCase().includes(searchTerm.toLowerCase())
-
     return matchAnio && matchMes && matchTexto
   })
 
-  // Cálculos globales ajustados con la comisión
+  // 🧮 Cálculos globales ajustados quitando el IVA correctamente (Bruto / 1.19)
   const recaudacionTotal = datosFiltrados.reduce((acc, curr) => acc + curr.recaudacion, 0)
-  const ivaTotal = Math.round(recaudacionTotal * 0.19)
+  const netoTotal = recaudacionTotal > 0 ? recaudacionTotal / 1.19 : 0
+  const ivaTotal = Math.round(recaudacionTotal - netoTotal)
   const comisionTotal = datosFiltrados.reduce((acc, curr) => acc + curr.comision, 0)
-  const utilidadNeta = recaudacionTotal - ivaTotal - comisionTotal
+  const utilidadNeta = Math.round(netoTotal - comisionTotal)
 
   // 📄 Exportar CSV con Blob y UTF-8 BOM
   const exportarCSV = () => {
     const headers = ['Empresa / Cliente', 'RUT', 'Tipo de Servicio', 'Frecuencia', 'Estado', 'Fecha', 'Recaudacion', 'IVA (19%)', 'Comision Tarjeta', 'Utilidad Neta']
     
     const rows = datosFiltrados.map(r => {
-      const iva = Math.round(r.recaudacion * 0.19)
-      const utilidad = r.recaudacion - iva - r.comision
+      const netoR = r.recaudacion > 0 ? r.recaudacion / 1.19 : 0
+      const iva = Math.round(r.recaudacion - netoR)
+      const utilidad = Math.round(netoR - r.comision)
       const nombreLimpio = (r.nombre || '').replace(/[^\w\s]/gi, '').trim()
       const rutLimpio = (r.rut || '').trim()
       
@@ -139,7 +140,6 @@ export default function ReportesPage() {
         utilidad
       ].join(',')
     })
-
     const csvContent = [headers.join(','), ...rows].join('\r\n')
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -163,7 +163,7 @@ export default function ReportesPage() {
         </div>
         <button 
           onClick={exportarCSV}
-          className="flex items-center gap-2 bg-[#C5A059] hover:bg-[#b59049] text-slate-950 font-bold px-4 py-2 rounded-lg text-xs shadow transition"
+          className="flex items-center gap-2 bg-[#C5A059] hover:bg-[#b59049] text-slate-950 font-bold px-4 py-2 rounded-lg text-xs shadow transition cursor-pointer"
         >
           <Download size={15} /> Exportar CSV por columnas
         </button>
@@ -176,7 +176,7 @@ export default function ReportesPage() {
           <select
             value={selectedAnio}
             onChange={(e) => setSelectedAnio(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059] bg-white font-medium"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059] bg-white font-medium cursor-pointer"
           >
             {anosDisponibles.map(anio => (
               <option key={anio} value={anio}>{anio}</option>
@@ -188,7 +188,7 @@ export default function ReportesPage() {
           <select
             value={selectedMes}
             onChange={(e) => setSelectedMes(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059] bg-white font-medium"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059] bg-white font-medium cursor-pointer"
           >
             {mesesDisponibles.map(mes => (
               <option key={mes} value={mes}>{mes}</option>
@@ -217,7 +217,7 @@ export default function ReportesPage() {
           <h3 className="text-xl font-black text-slate-900">${recaudacionTotal.toLocaleString('es-CL')}</h3>
         </article>
         <article className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm space-y-1">
-          <p className="text-xs font-semibold text-slate-400">IVA (19% estimado)</p>
+          <p className="text-xs font-semibold text-slate-400">IVA (19% desglosado)</p>
           <h3 className="text-xl font-black text-slate-900">${ivaTotal.toLocaleString('es-CL')}</h3>
         </article>
         <article className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm space-y-1">
@@ -258,9 +258,10 @@ export default function ReportesPage() {
               ) : (
                 datosFiltrados.map((item) => {
                   const monto = item.recaudacion
-                  const ivaItem = Math.round(monto * 0.19)
+                  const netoItem = monto > 0 ? monto / 1.19 : 0
+                  const ivaItem = Math.round(monto - netoItem)
                   const comisionItem = item.comision
-                  const utilidadItem = monto - ivaItem - comisionItem
+                  const utilidadItem = Math.round(netoItem - comisionItem)
                   
                   return (
                     <tr key={item.id} className="hover:bg-slate-50 transition">
