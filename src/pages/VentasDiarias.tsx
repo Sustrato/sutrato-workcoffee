@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../services/supabase'
-import { Upload, Trash2, Layers, Check, AlertCircle, Loader2, ArrowUpDown, ChevronDown, PlusCircle, BarChart3, ListOrdered, PieChart, Activity, Target, Users, DollarSign } from 'lucide-react'
+import { Upload, Trash2, Layers, Check, AlertCircle, Loader2, ArrowUpDown, ChevronDown, PlusCircle, BarChart3, ListOrdered, PieChart, Activity, Target, Users, DollarSign, TrendingUp, AlertTriangle, Wallet, Calculator, Lock, CreditCard, Landmark } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
 interface Venta {
@@ -30,6 +30,7 @@ const LINEAS_NEGOCIO_DEFAULT = [
   'Oficinas físicas',
   'Cowork y membresías',
   'Arriendo de salón',
+  'Efectivo de caja',
   'Otros ingresos',
 ]
 
@@ -38,7 +39,9 @@ const MEDIOS_PAGO_DEFAULT = [
   'Transferencia',
   'Débito',
   'Crédito',
-  'Edenred',
+  'edenred',
+  'Tarjeta Junaeb',
+  'Reembolso Junaeb / Edenred (Agrupado)',
   'Pluxee',
   'Amipass',
   'Mercado Pago',
@@ -55,10 +58,37 @@ export default function VentasDiarias() {
   const [ventas, setVentas] = useState<Venta[]>([])
   const [loading, setLoading] = useState(false)
   
+  // 💰 Estados persistentes con localStorage para control de caja y saldos
+  const [cajaChicaInicial, setCajaChicaInicial] = useState<string>(() => {
+    return localStorage.getItem('sustrato_caja_inicial') || '400000'
+  })
+  const [cierreEfectivoActual, setCierreEfectivoActual] = useState<string>(() => {
+    return localStorage.getItem('sustrato_caja_cierre') || '600000'
+  })
+
+  // 🌟 NUEVO: Estado para el saldo actual en la cuenta de Mercado Pago / Banco
+  const [saldoMercadoPago, setSaldoMercadoPago] = useState<string>(() => {
+    return localStorage.getItem('sustrato_saldo_mp') || '0'
+  })
+
+  useEffect(() => {
+    localStorage.setItem('sustrato_caja_inicial', cajaChicaInicial)
+  }, [cajaChicaInicial])
+
+  useEffect(() => {
+    localStorage.setItem('sustrato_caja_cierre', cierreEfectivoActual)
+  }, [cierreEfectivoActual])
+
+  useEffect(() => {
+    localStorage.setItem('sustrato_saldo_mp', saldoMercadoPago)
+  }, [saldoMercadoPago])
+
   // Notificaciones flotantes tipo Toast
   const [mensajeExito, setMensajeExito] = useState('')
   const [mensajeError, setMensajeError] = useState('')
   
+  const [modalEliminar, setModalEliminar] = useState<{ id: string; documento: string } | null>(null)
+
   const [filtroFecha, setFiltroFecha] = useState('')
   const [filtroPeriodo, setFiltroPeriodo] = useState<string>('mes_actual')
   const [filtroMedioPago, setFiltroMedioPago] = useState('Todos')
@@ -68,7 +98,6 @@ export default function VentasDiarias() {
   const [ordenColumna, setOrdenColumna] = useState<'fecha' | 'monto_bruto'>('fecha')
   const [ordenDireccion, setOrdenDireccion] = useState<'asc' | 'desc'>('desc')
   
-  // Estado para el Desplegable Pro y Pestaña Visual de Analítica
   const [formularioAbierto, setFormularioAbierto] = useState(false)
   const [activeTab, setActiveTab] = useState<'tabla' | 'estadisticas'>('tabla')
   const [listaMultiple, setListaMultiple] = useState<ItemIngresoRapido[]>([
@@ -138,34 +167,131 @@ export default function VentasDiarias() {
   }
 
   useEffect(() => {
-    fetchVentas(false)
+    void fetchVentas(false)
   }, [])
 
   const handleCambioPeriodo = (nuevoPeriodo: string) => {
     setFiltroPeriodo(nuevoPeriodo)
     setFiltroFecha('')
     if (nuevoPeriodo === 'todos' || nuevoPeriodo === 'anio_actual') {
-      fetchVentas(true)
+      void fetchVentas(true)
     } else {
-      fetchVentas(false)
+      void fetchVentas(false)
     }
   }
 
-  // 🚀 IMPORTADOR UNIVERSAL CON CONSULTA EXPLÍCITA DE USUARIO AUTENTICADO
+  // 💰 CÁLCULO DEL EFECTIVO NETO VENDIDO EN EL DÍA
+  const calculoCajaEfectivo = useMemo(() => {
+    const inicial = Number(cajaChicaInicial) || 0
+    const actual = Number(cierreEfectivoActual) || 0
+    const diferencia = actual - inicial
+    return { inicial, actual, diferencia }
+  }, [cajaChicaInicial, cierreEfectivoActual])
+
+  // 🚀 REGISTRAR CAJA SISTEMA
+  const handleRegistrarCajaSistema = async (esCierre: boolean = false) => {
+    const montoValor = esCierre ? calculoCajaEfectivo.diferencia : Number(cajaChicaInicial)
+    if (montoValor <= 0) {
+      mostrarAlertaError('El monto debe ser mayor a 0.')
+      return
+    }
+    setLoading(true)
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError || !user) {
+        throw new Error("Acceso denegado: Debes iniciar sesión con una cuenta autorizada.")
+      }
+
+      const nuevoRegistro = {
+        fecha,
+        linea_negocio: 'Efectivo de caja',
+        medio_pago: 'Efectivo',
+        monto_bruto: montoValor,
+        comision: 0,
+        propina: 0,
+        documento: esCierre ? `Cierre-Caja-${Date.now()}` : `Fondo-Inicial-${Date.now()}`,
+        observacion: esCierre ? `Cierre efectivo (Fondo: $${calculoCajaEfectivo.inicial.toLocaleString('es-CL')} / Final: $${calculoCajaEfectivo.actual.toLocaleString('es-CL')})` : 'Fondo inicial de caja'
+      }
+
+      const { error } = await supabase.from('ventas_diarias').insert([nuevoRegistro])
+      if (error) throw error
+
+      mostrarAlertaExito(esCierre ? '¡Cierre de caja registrado con éxito en su sistema!' : '¡Fondo inicial registrado con éxito en su sistema!')
+      void fetchVentas(filtroPeriodo === 'todos' || filtroPeriodo === 'anio_actual')
+    } catch (err: any) {
+      mostrarAlertaError('Error al registrar: ' + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 🔄 BOTÓN MASIVO PARA PASAR TODOS LOS EDENRED A TARJETA JUNAEB
+  const handlePasarTodosAJunaeb = async () => {
+    setLoading(true)
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError || !user) throw new Error("Acceso denegado. Inicia sesión.")
+
+      const idsAModificar = ventas.filter(v => (v.medio_pago || '').toLowerCase() === 'edenred').map(v => v.id)
+
+      if (idsAModificar.length === 0) {
+        mostrarAlertaError('No se encontraron registros con medio de pago "edenred" para actualizar.')
+        setLoading(false)
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('ventas_diarias')
+        .update({ medio_pago: 'Tarjeta Junaeb' })
+        .in('id', idsAModificar)
+        .select()
+
+      if (error) throw error
+      if (!data || data.length === 0) {
+        throw new Error("Supabase bloqueó la actualización. Revisa las políticas RLS.")
+      }
+
+      mostrarAlertaExito(`¡Se pasaron ${data.length} registros a Tarjeta Junaeb con éxito!`)
+      void fetchVentas(filtroPeriodo === 'todos' || filtroPeriodo === 'anio_actual')
+    } catch (err: any) {
+      mostrarAlertaError('Error al actualizar pagos: ' + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 🔄 CAMBIAR MEDIO DE PAGO MANUALMENTE POR CADA FILA
+  const handleCambioMedioPagoFila = async (id: string, nuevoMedio: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('ventas_diarias')
+        .update({ medio_pago: nuevoMedio })
+        .eq('id', id)
+        .select()
+
+      if (error) throw error
+      if (!data || data.length === 0) {
+        throw new Error("Supabase bloqueó la actualización (posible RLS policy).")
+      }
+
+      mostrarAlertaExito(`Medio de pago cambiado a ${nuevoMedio}.`)
+      setVentas(ventas.map(v => v.id === id ? { ...v, medio_pago: nuevoMedio } : v))
+    } catch (err: any) {
+      mostrarAlertaError('Error al actualizar: ' + err.message)
+    }
+  }
+
+  // 🚀 IMPORTADOR UNIVERSAL
   const handleImportarArchivo = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-
     setLoading(true)
     try {
-      // 🔒 Validamos explícitamente si el usuario actual está autenticado
       const { data: { user }, error: userError } = await supabase.auth.getUser()
       if (userError || !user) {
         throw new Error("Acceso denegado: Debes iniciar sesión con una cuenta autorizada para importar registros.")
       }
-
       let rows: any[][] = []
-
       if (file.name.endsWith('.txt') || file.name.endsWith('.csv') || file.type.includes('text')) {
         const text = await file.text()
         const lines = text.split(/\r?\n/)
@@ -177,13 +303,12 @@ export default function VentasDiarias() {
         const worksheet = workbook.Sheets[firstSheetName]
         rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 })
       }
-
       let registrosNuevos: any[] = []
       let idxOp = -1
       let idxFecha = -1
       let idxCobro = -1
       let idxPropina = -1
-
+      let idxMedioPago = -1
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i]
         if (!row) continue
@@ -193,21 +318,24 @@ export default function VentasDiarias() {
           if (val.includes('fecha de la compra')) idxFecha = j
           if (val === 'cobro') idxCobro = j
           if (val.includes('propina')) idxPropina = j
+          if (val.includes('medio de pago') || val.includes('tarjeta') || val.includes('tipo')) idxMedioPago = j
         }
-
         if (idxOp !== -1 && idxCobro !== -1) {
           for (let k = i + 1; k < rows.length; k++) {
             const dataRow = rows[k]
             if (!dataRow || dataRow.length === 0) continue
-
             const numOp = String(dataRow[idxOp] || '').trim()
             if (!numOp || isNaN(Number(numOp))) continue
-
             const montoBruto = Number(dataRow[idxCobro] || 0)
             if (isNaN(montoBruto) || montoBruto <= 0) continue
-
             const propinaVal = idxPropina !== -1 ? Number(dataRow[idxPropina] || 0) : 0
             const propina = isNaN(propinaVal) ? 0 : propinaVal
+            
+            let medioPagoImportado = 'Débito'
+            if (idxMedioPago !== -1) {
+              const rawMedio = String(dataRow[idxMedioPago] || '').trim()
+              if (rawMedio) medioPagoImportado = rawMedio
+            }
 
             let fechaVenta = new Date().toISOString().split('T')[0]
             const rawFecha = String(dataRow[idxFecha] || '').trim()
@@ -224,11 +352,10 @@ export default function VentasDiarias() {
                 fechaVenta = `${anio}-${mes}-${dia}`
               }
             }
-
             registrosNuevos.push({
               fecha: fechaVenta,
               linea_negocio: 'Ventas cafetería',
-              medio_pago: 'Efectivo',
+              medio_pago: medioPagoImportado,
               monto_bruto: montoBruto,
               comision: 0,
               propina: propina,
@@ -239,21 +366,18 @@ export default function VentasDiarias() {
           break
         }
       }
-
       if (registrosNuevos.length === 0) {
         mostrarAlertaError("No se pudieron detectar transacciones válidas. Asegúrate de subir el archivo oficial de Mercado Pago.")
         setLoading(false)
         return
       }
-
-      // Al estar el usuario autenticado verificado, Supabase permite el upsert sin romper el RLS
       const { error } = await supabase.from('ventas_diarias').upsert(registrosNuevos, { onConflict: 'documento' })
       
       if (error) {
         mostrarAlertaError("Error al guardar en base de datos: " + error.message)
       } else {
         mostrarAlertaExito(`¡Se importaron ${registrosNuevos.length} registros correctamente sin duplicar!`)
-        fetchVentas(filtroPeriodo === 'todos' || filtroPeriodo === 'anio_actual')
+        void fetchVentas(filtroPeriodo === 'todos' || filtroPeriodo === 'anio_actual')
       }
     } catch (err: any) {
       mostrarAlertaError("Error al procesar el archivo: " + err.message)
@@ -263,7 +387,7 @@ export default function VentasDiarias() {
     }
   }
 
-  // 🚀 GUARDADO MÚLTIPLE CON CONSULTA EXPLÍCITA DE USUARIO AUTENTICADO
+  // 🚀 GUARDADO MÚLTIPLE
   const handleGuardarMultiple = async () => {
     const itemsValidos = listaMultiple.filter(item => item.montoBruto && Number(item.montoBruto) > 0)
     if (itemsValidos.length === 0) {
@@ -275,15 +399,12 @@ export default function VentasDiarias() {
       mostrarAlertaError('Por favor especifica la línea de negocio.')
       return
     }
-
     setLoading(true)
     try {
-      // 🔒 Validamos explícitamente si el usuario actual está autenticado
       const { data: { user }, error: userError } = await supabase.auth.getUser()
       if (userError || !user) {
         throw new Error("Acceso denegado: Debes iniciar sesión con una cuenta autorizada para registrar ventas.")
       }
-
       const timestampBase = Date.now()
       const nuevasVentas = itemsValidos.map((item, index) => ({
         fecha,
@@ -298,11 +419,10 @@ export default function VentasDiarias() {
       
       const { error } = await supabase.from('ventas_diarias').insert(nuevasVentas)
       if (error) throw error
-
       mostrarAlertaExito(`¡Se registraron correctamente ${nuevasVentas.length} ventas!`)
       setListaMultiple([{ id: '1', montoBruto: '', propina: '', observacion: '' }])
       setFormularioAbierto(false)
-      fetchVentas(filtroPeriodo === 'todos' || filtroPeriodo === 'anio_actual')
+      void fetchVentas(filtroPeriodo === 'todos' || filtroPeriodo === 'anio_actual')
     } catch (err: any) {
       mostrarAlertaError('Error al guardar los registros: ' + err.message)
     } finally {
@@ -319,26 +439,27 @@ export default function VentasDiarias() {
     setListaMultiple(listaMultiple.filter(item => item.id !== id))
   }
 
-  // 🚀 ELIMINAR REGISTRO MANUAL CON CONSULTA EXPLÍCITA DE USUARIO AUTENTICADO
-  const handleEliminarVenta = async (id: string, doc: string) => {
-    if (doc && doc.startsWith('MP-')) {
+  // 🚀 ELIMINAR REGISTRO MANUAL
+  const confirmarEliminacionVenta = async () => {
+    if (!modalEliminar) return
+    const { id, documento } = modalEliminar
+    setModalEliminar(null)
+
+    if (documento && documento.startsWith('MP-')) {
       mostrarAlertaError('⚠️ Los registros importados de Mercado Pago no se pueden eliminar por seguridad.')
       return
     }
-    if (!confirm('¿Estás seguro de eliminar este registro manual?')) return
 
     try {
-      // 🔒 Validamos explícitamente si el usuario actual está autenticado
       const { data: { user }, error: userError } = await supabase.auth.getUser()
       if (userError || !user) {
-        throw new Error("Acceso denegado: Debes iniciar sesión con una cuenta autorizada para eliminar registros.")
+        throw new Error("Acceso denegado: Debes iniciar sesión con una cuenta autorizada.")
       }
-
       const { error } = await supabase.from('ventas_diarias').delete().eq('id', id)
       if (error) throw error
-
-      mostrarAlertaExito('Registro eliminado correctamente.')
-      fetchVentas(filtroPeriodo === 'todos' || filtroPeriodo === 'anio_actual')
+      
+      mostrarAlertaExito('Se ha borrado con éxito en su sistema.')
+      void fetchVentas(filtroPeriodo === 'todos' || filtroPeriodo === 'anio_actual')
     } catch (err: any) {
       mostrarAlertaError('Error al eliminar: ' + err.message)
     }
@@ -407,15 +528,21 @@ export default function VentasDiarias() {
     }
   }
 
-  const totalBrutoFiltrado = ventasFiltradas.reduce((acc, curr) => acc + Number(curr.monto_bruto || 0), 0)
-  const totalComisionFiltrado = ventasFiltradas.reduce((acc, curr) => acc + Number(curr.comision || 0), 0)
-  const totalPropinaFiltrado = ventasFiltradas.reduce((acc, curr) => acc + Number(curr.propina || 0), 0)
+  // 🌟 Excluir las ventas individuales de Tarjeta Junaeb y Edenred de los totales generales
+  const ventasParaTotales = ventasFiltradas.filter(v => {
+    const m = (v.medio_pago || '').toLowerCase()
+    const esIndividualJunaEden = (m.includes('junaeb') || m.includes('edenred')) && !m.includes('agrupado')
+    return !esIndividualJunaEden
+  })
+
+  const totalBrutoFiltrado = ventasParaTotales.reduce((acc, curr) => acc + Number(curr.monto_bruto || 0), 0)
+  const totalComisionFiltrado = ventasParaTotales.reduce((acc, curr) => acc + Number(curr.comision || 0), 0)
+  const totalPropinaFiltrado = ventasParaTotales.reduce((acc, curr) => acc + Number(curr.propina || 0), 0)
   const totalMultiple = listaMultiple.reduce((acc, curr) => acc + (Number(curr.montoBruto) || 0), 0)
   const totalPropinaMultiple = listaMultiple.reduce((acc, curr) => acc + (Number(curr.propina) || 0), 0)
-
-  const cantidadTransacciones = ventasFiltradas.length
+  const cantidadTransacciones = ventasParaTotales.length
   const ticketPromedio = cantidadTransacciones > 0 ? Math.round(totalBrutoFiltrado / cantidadTransacciones) : 0
-  
+
   const proyeccionCierreMensual = useMemo(() => {
     const hoy = new Date()
     const anioActualCalc = hoy.getFullYear()
@@ -426,22 +553,83 @@ export default function VentasDiarias() {
     const ventasMesActual = ventas.filter(v => {
       if (!v.fecha) return false
       const [vAnio, vMes] = v.fecha.split('-').map(Number)
-      return vAnio === anioActualCalc && vMes === (mesActualCalc + 1)
+      const m = (v.medio_pago || '').toLowerCase()
+      const esIndividual = (m.includes('junaeb') || m.includes('edenred')) && !m.includes('agrupado')
+      return vAnio === anioActualCalc && vMes === (mesActualCalc + 1) && !esIndividual
     })
     const totalMesActual = ventasMesActual.reduce((acc, curr) => acc + Number(curr.monto_bruto || 0), 0)
-    if (diaActual === 0 || totalMesActual === 0) return 0
+    if (diaActual === 0 || totalMesActual <= 0) return 0
     const promedioDiario = totalMesActual / diaActual
     return Math.round(promedioDiario * totalDiasMes)
   }, [ventas])
 
+  const metaDiariaJefe = 200000
+  const resumenCafeteriaDiaria = useMemo(() => {
+    const hoy = new Date()
+    const anioActual = hoy.getFullYear()
+    const mesActual = hoy.getMonth() + 1
+    const diaActual = hoy.getDate()
+
+    const ventasCafeteriaMes = ventas.filter(v => {
+      if (!v.fecha) return false
+      const [vAnio, vMes] = v.fecha.split('-').map(Number)
+      const esCafeteria = (v.linea_negocio || '').toLowerCase().includes('cafetería') || (v.linea_negocio || '').toLowerCase().includes('cafeteria')
+      const m = (v.medio_pago || '').toLowerCase()
+      const esIndividual = (m.includes('junaeb') || m.includes('edenred')) && !m.includes('agrupado')
+      return vAnio === anioActual && vMes === mesActual && esCafeteria && !esIndividual
+    })
+
+    const totalNetoCafeteriaMes = ventasCafeteriaMes.reduce((acc, curr) => {
+      const bruto = Number(curr.monto_bruto || 0)
+      const propina = Number(curr.propina || 0)
+      return acc + (bruto - propina)
+    }, 0)
+
+    const promedioDiarioReal = diaActual > 0 ? Math.round(totalNetoCafeteriaMes / diaActual) : 0
+    const rentaJefeDiaria = promedioDiarioReal >= metaDiariaJefe
+
+    return {
+      promedioDiarioReal,
+      rentaJefeDiaria,
+      diferenciaDiaria: promedioDiarioReal - metaDiariaJefe
+    }
+  }, [ventas])
+
+  const ingresosDiariosLinea = useMemo(() => {
+    const hoy = new Date()
+    const resultado = []
+    
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date()
+      d.setDate(hoy.getDate() - i)
+      const fechaStr = d.toISOString().split('T')[0]
+      const etiquetaDia = `${d.getDate()}/${d.getMonth() + 1}`
+
+      const ventasDelDia = ventas.filter(v => {
+        const m = (v.medio_pago || '').toLowerCase()
+        const esIndividual = (m.includes('junaeb') || m.includes('edenred')) && !m.includes('agrupado')
+        return String(v.fecha || '').split('T')[0] === fechaStr && !esIndividual
+      })
+      const totalDia = ventasDelDia.reduce((acc, curr) => acc + Number(curr.monto_bruto || 0), 0)
+
+      resultado.push({
+        etiqueta: etiquetaDia,
+        monto: totalDia,
+        fecha: fechaStr
+      })
+    }
+    const maxMonto = Math.max(...resultado.map(r => r.monto), 50000)
+    return { resultado, maxMonto }
+  }, [ventas])
+
   const ventasPorMedioPago = useMemo(() => {
     const mapa: { [key: string]: number } = {}
-    ventasFiltradas.forEach(v => {
+    ventasParaTotales.forEach(v => {
       const medio = v.medio_pago || 'Otro'
       mapa[medio] = (mapa[medio] || 0) + Number(v.monto_bruto || 0)
     })
     return Object.entries(mapa).sort((a, b) => b[1] - a[1])
-  }, [ventasFiltradas])
+  }, [ventasParaTotales])
 
   const coloresPaleta = ['#C5A059', '#3B82F6', '#10B981', '#8B5CF6', '#EC4899', '#F59E0B', '#6366F1', '#14B8A6']
   let acumuladoAngulo = 0
@@ -464,6 +652,39 @@ export default function VentasDiarias() {
   return (
     <div className="space-y-8 p-6 bg-slate-50 min-h-screen relative font-sans">
       
+      {/* MODAL DE CONFIRMACIÓN */}
+      {modalEliminar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white p-7 rounded-3xl shadow-2xl border border-slate-200 max-w-sm w-full space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl">
+                <AlertCircle size={24} />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-slate-900">¿Estás seguro de eliminar?</h3>
+                <p className="text-xs text-slate-500">Esta acción borrará el registro de forma permanente en su sistema.</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setModalEliminar(null)}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black rounded-2xl transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarEliminacionVenta}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-black rounded-2xl shadow-md transition"
+              >
+                Sí, eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* NOTIFICACIONES FLOTANTES */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none">
         {mensajeExito && (
@@ -484,7 +705,7 @@ export default function VentasDiarias() {
         <div>
           <span className="text-xs font-black uppercase tracking-wider text-[#C5A059]">Sustrato WorkCoffee • Arica</span>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">Ventas Diarias</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Control avanzado de transacciones, filtros temporales y analítica pro</p>
+          <p className="text-xs text-slate-500 mt-0.5">Control avanzado de transacciones, caja chica y saldo digital</p>
         </div>
         <div className="flex items-center gap-3 w-full md:w-auto">
           <label className="cursor-pointer flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black shadow-md transition-all">
@@ -500,6 +721,123 @@ export default function VentasDiarias() {
         </div>
       </div>
 
+      {/* 💰 PANEL DE CONTROL DE EFECTIVO Y SALDO MERCADO PAGO / BANCOS */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        {/* Caja Chica / Efectivo */}
+        <div className="bg-white rounded-3xl border border-slate-200/90 p-6 shadow-sm space-y-4">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-amber-500/10 text-[#C5A059] rounded-2xl border border-amber-500/20">
+                <Wallet size={20} />
+              </div>
+              <div>
+                <h2 className="text-sm font-black text-slate-900 tracking-wide">Control de Efectivo Diario</h2>
+                <p className="text-[11px] text-slate-500 font-medium mt-0.5">Fondo inicial y cierre neto en caja</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <button
+                type="button"
+                onClick={() => handleRegistrarCajaSistema(false)}
+                disabled={loading}
+                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-black transition disabled:opacity-50"
+              >
+                <PlusCircle size={14} />
+                <span>Fondo Inicial</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRegistrarCajaSistema(true)}
+                disabled={loading}
+                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-3 py-2 bg-[#181818] hover:bg-black text-[#C5A059] rounded-xl text-xs font-black shadow transition disabled:opacity-50"
+              >
+                <Lock size={14} />
+                <span>Cierre</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            <div>
+              <label className="block text-[11px] font-black text-slate-700 mb-1">Caja inicial ($)</label>
+              <input 
+                type="number"
+                value={cajaChicaInicial}
+                onChange={(e) => setCajaChicaInicial(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-black text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-[#C5A059]/40"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-black text-slate-700 mb-1">Efectivo cierre ($)</label>
+              <input 
+                type="number"
+                value={cierreEfectivoActual}
+                onChange={(e) => setCierreEfectivoActual(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-black text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-[#C5A059]/40"
+              />
+            </div>
+            <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border border-amber-500/30 rounded-xl p-3 flex flex-col justify-center">
+              <span className="text-[9px] font-black uppercase tracking-wider text-amber-800 flex items-center gap-1">
+                <Calculator size={11} /> Neto Caja
+              </span>
+              <p className="text-base font-black text-slate-900 font-mono mt-0.5">
+                ${calculoCajaEfectivo.diferencia.toLocaleString('es-CL')}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* 🌟 SALDO ACTUAL EN MERCADO PAGO / BANCO */}
+        <div className="bg-white rounded-3xl border border-slate-200/90 p-6 shadow-sm space-y-4 flex flex-col justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-blue-500/10 text-blue-600 rounded-2xl border border-blue-500/20">
+              <Landmark size={20} />
+            </div>
+            <div>
+              <h2 className="text-sm font-black text-slate-900 tracking-wide">Saldo Actual en Mercado Pago / Banco</h2>
+              <p className="text-[11px] text-slate-500 font-medium mt-0.5">Dinero líquido disponible para empezar la semana</p>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-black text-slate-700 mb-1">Monto actual en cuenta digital ($)</label>
+            <input 
+              type="number"
+              value={saldoMercadoPago}
+              onChange={(e) => setSaldoMercadoPago(e.target.value)}
+              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-sm font-black text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            />
+          </div>
+
+          <div className="text-[10px] text-slate-400 font-medium">
+            * Se guarda automáticamente para referencia rápida de liquidez.
+          </div>
+        </div>
+
+      </div>
+
+      {/* 💳 BOTÓN RÁPIDO PARA PASAR EDENRED A TARJETA JUNAEB */}
+      <div className="bg-white rounded-3xl border border-slate-200/90 p-5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-[#C5A059]/10 text-[#C5A059] rounded-2xl border border-[#C5A059]/20">
+            <CreditCard size={20} />
+          </div>
+          <div>
+            <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider">Migración Rápida edenred → Tarjeta Junaeb</h3>
+            <p className="text-[11px] text-slate-500">Pasa todos los pagos registrados como "edenred" directamente a "Tarjeta Junaeb" en un clic</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void handlePasarTodosAJunaeb()}
+          disabled={loading}
+          className="w-full sm:w-auto px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow transition disabled:opacity-50"
+        >
+          Pasar todos los edenred a Tarjeta Junaeb
+        </button>
+      </div>
+
       {/* PANEL DE NUEVO REGISTRO */}
       <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden transition-all duration-300">
         <button
@@ -512,8 +850,8 @@ export default function VentasDiarias() {
               <Layers size={20} />
             </div>
             <div>
-              <h2 className="text-sm font-black text-white tracking-wide">Panel de Nuevo Registro Financiero</h2>
-              <p className="text-[11px] text-[#C5A059] font-bold mt-0.5">Despliega para registrar ingresos múltiples al instante en Sustrato</p>
+              <h2 className="text-sm font-black text-white tracking-wide">Panel de Nuevo Registro Financiero (Pagos Agrupados / Otros)</h2>
+              <p className="text-[11px] text-[#C5A059] font-bold mt-0.5">Usa "Reembolso Junaeb / Edenred (Agrupado)" para ingresar el dinero real que te llegó</p>
             </div>
           </div>
           <div className="flex items-center gap-2 bg-white/10 px-3.5 py-1.5 rounded-xl text-xs font-black text-[#C5A059] border border-amber-500/20">
@@ -521,7 +859,6 @@ export default function VentasDiarias() {
             <ChevronDown size={16} className={`transition-transform duration-300 ${formularioAbierto ? 'rotate-180' : ''}`} />
           </div>
         </button>
-
         {formularioAbierto && (
           <div className="p-7 space-y-6 bg-slate-50/50 border-t border-slate-100 animate-fadeIn">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -572,7 +909,6 @@ export default function VentasDiarias() {
                 </select>
               </div>
             </div>
-
             <div className="space-y-2.5 pt-2 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
               <label className="block text-xs font-black text-slate-800 uppercase tracking-wider">Montos, propinas y observaciones:</label>
               
@@ -608,7 +944,7 @@ export default function VentasDiarias() {
                   <div className="flex-1">
                     <input 
                       type="text"
-                      placeholder="Observación opcional..."
+                      placeholder="N° de reembolso o nota (ej. Reembolso 1571186)..."
                       value={item.observacion}
                       onChange={(e) => {
                         const nuevaLista = [...listaMultiple]
@@ -629,7 +965,6 @@ export default function VentasDiarias() {
                 </div>
               ))}
             </div>
-
             <div className="flex justify-between items-center pt-1">
               <button 
                 type="button"
@@ -650,7 +985,6 @@ export default function VentasDiarias() {
                 </div>
               </div>
             </div>
-
             <div className="pt-4 border-t border-slate-200 flex justify-end gap-3">
               <button 
                 type="button"
@@ -769,7 +1103,7 @@ export default function VentasDiarias() {
                   </th>
                   <th className="py-3.5 px-4">Línea de negocio</th>
                   <th className="py-3.5 px-4">Medio de pago</th>
-                  <th className="py-3.5 px-4">Documento</th>
+                  <th className="py-3.5 px-4">Documento / Observación</th>
                   <th onClick={() => cambiarOrden('monto_bruto')} className="py-3.5 px-4 cursor-pointer hover:text-white transition select-none">
                     <div className="flex items-center gap-1.5">
                       <span>Venta bruta</span>
@@ -778,7 +1112,7 @@ export default function VentasDiarias() {
                   </th>
                   <th className="py-3.5 px-4">Comisión</th>
                   <th className="py-3.5 px-4">Propina</th>
-                  <th className="py-3.5 px-4 text-center">Acciones</th>
+                  <th className="py-3.5 px-4 text-center">Acciones (edenred ⇄ Junaeb)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs font-medium">
@@ -789,18 +1123,51 @@ export default function VentasDiarias() {
                 ) : (
                   ventasFiltradas.map((v) => {
                     const esMpAutomatico = v.documento && v.documento.startsWith('MP-')
+                    const medioLower = (v.medio_pago || '').toLowerCase()
+                    const esEdenred = medioLower === 'edenred'
+                    const esJunaeb = medioLower.includes('junaeb')
+
                     return (
                       <tr key={v.id} className="hover:bg-amber-50/20 transition-colors">
                         <td className="py-4 px-4 text-slate-600 font-mono font-bold">{v.fecha}</td>
                         <td className="py-4 px-4 font-bold text-slate-800">{v.linea_negocio}</td>
-                        <td className="py-4 px-4 text-slate-600">{v.medio_pago}</td>
-                        <td className="py-4 px-4 text-slate-500 font-mono">{v.documento}</td>
+                        <td className="py-4 px-4 font-bold text-amber-800">{v.medio_pago}</td>
+                        <td className="py-4 px-4 text-slate-500 font-mono">
+                          <div>{v.documento}</div>
+                          {v.observacion && <div className="text-[10px] text-slate-400 font-sans">{v.observacion}</div>}
+                        </td>
                         <td className="py-4 px-4 font-black text-slate-900 font-mono">${Number(v.monto_bruto).toLocaleString('es-CL')}</td>
                         <td className="py-4 px-4 text-rose-600 font-bold font-mono">${Number(v.comision || 0).toLocaleString('es-CL')}</td>
                         <td className="py-4 px-4 text-emerald-700 font-black font-mono">${Number(v.propina || 0).toLocaleString('es-CL')}</td>
-                        <td className="py-4 px-4 text-center">
+                        <td className="py-4 px-4 text-center flex items-center justify-center gap-2">
+                          {esEdenred && (
+                            <button
+                              type="button"
+                              onClick={() => void handleCambioMedioPagoFila(v.id, 'Tarjeta Junaeb')}
+                              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-[10px] font-black shadow transition flex items-center gap-1"
+                              title="Cambiar a Tarjeta Junaeb"
+                            >
+                              🔄 Cambiar a Junaeb
+                            </button>
+                          )}
+                          {esJunaeb && (
+                            <button
+                              type="button"
+                              onClick={() => void handleCambioMedioPagoFila(v.id, 'edenred')}
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-black text-[#C5A059] rounded-xl text-[10px] font-black shadow transition flex items-center gap-1"
+                              title="Volver a edenred"
+                            >
+                              🔄 Volver a edenred
+                            </button>
+                          )}
+
                           {!esMpAutomatico ? (
-                            <button onClick={() => handleEliminarVenta(v.id, v.documento)} className="text-rose-500 hover:text-rose-700 p-1.5 rounded-xl transition hover:bg-rose-50" title="Eliminar registro manual">
+                            <button 
+                              type="button"
+                              onClick={() => setModalEliminar({ id: v.id, documento: v.documento })} 
+                              className="text-rose-500 hover:text-rose-700 p-1.5 rounded-xl transition hover:bg-rose-50" 
+                              title="Eliminar registro manual"
+                            >
                               <Trash2 size={16} />
                             </button>
                           ) : (
@@ -815,7 +1182,7 @@ export default function VentasDiarias() {
               {!loading && ventasFiltradas.length > 0 && (
                 <tfoot>
                   <tr className="bg-slate-100/80 border-t-2 border-slate-200 text-xs font-black text-slate-900">
-                    <td colSpan={4} className="py-4 px-4 text-right">TOTALES FILTRADOS:</td>
+                    <td colSpan={4} className="py-4 px-4 text-right">TOTALES FILTRADOS NETOS (Sin duplicar Junaeb individual):</td>
                     <td className="py-4 px-4 text-slate-900 font-mono">${totalBrutoFiltrado.toLocaleString('es-CL')}</td>
                     <td className="py-4 px-4 text-rose-600 font-mono">${totalComisionFiltrado.toLocaleString('es-CL')}</td>
                     <td className="py-4 px-4 text-emerald-700 font-mono">${totalPropinaFiltrado.toLocaleString('es-CL')}</td>
@@ -831,7 +1198,7 @@ export default function VentasDiarias() {
           <div className="space-y-6 animate-fadeIn pt-2">
             <div className="grid gap-5 sm:grid-cols-3">
               <article className="p-6 rounded-3xl border border-slate-200 bg-slate-50/60 shadow-sm border-l-6 border-l-[#C5A059]">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Venta Bruta Filtrada</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Venta Bruta Filtrada (Neta)</p>
                 <h4 className="text-2xl font-black text-slate-900 mt-1 font-mono">${totalBrutoFiltrado.toLocaleString('es-CL')}</h4>
               </article>
               <article className="p-6 rounded-3xl border border-slate-200 bg-slate-50/60 shadow-sm border-l-6 border-l-rose-500">
@@ -844,6 +1211,34 @@ export default function VentasDiarias() {
               </article>
             </div>
             
+            {/* ☕ KPI DE RENTABILIDAD CAFETERÍA DIARIA (Meta: > $200.000 diarios - Sin propinas) */}
+            <article className={`p-6 rounded-3xl border shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+              resumenCafeteriaDiaria.rentaJefeDiaria ? 'border-emerald-200 bg-emerald-50/60' : 'border-amber-200 bg-amber-50/60'
+            }`}>
+              <div className="flex items-center gap-4">
+                <div className={`p-3.5 rounded-2xl text-white shadow-md ${resumenCafeteriaDiaria.rentaJefeDiaria ? 'bg-emerald-600' : 'bg-amber-600'}`}>
+                  {resumenCafeteriaDiaria.rentaJefeDiaria ? <TrendingUp size={24} /> : <AlertTriangle size={24} />}
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">KPI Cafetería • Meta del Jefe (&gt; $200.000 diarios netos)</span>
+                  <h3 className="text-lg font-black text-slate-900 mt-0.5">
+                    {resumenCafeteriaDiaria.rentaJefeDiaria ? '¡La cafetería supera los $200k diarios! 🚀' : 'Atención: El promedio diario está bajo los $200k ⚠️'}
+                  </h3>
+                  <p className="text-xs text-slate-600 font-medium mt-0.5">
+                    Promedio diario real (sin propinas): <span className="font-bold font-mono">${resumenCafeteriaDiaria.promedioDiarioReal.toLocaleString('es-CL')}</span> 
+                    {' '}(Meta mínima diaria: $200.000)
+                  </p>
+                </div>
+              </div>
+              <div className={`px-5 py-3 rounded-2xl text-xs font-black shadow-inner font-mono text-center shrink-0 ${
+                resumenCafeteriaDiaria.rentaJefeDiaria ? 'bg-emerald-600 text-white' : 'bg-amber-600 text-white'
+              }`}>
+                {resumenCafeteriaDiaria.rentaJefeDiaria 
+                  ? `+ $${resumenCafeteriaDiaria.diferenciaDiaria.toLocaleString('es-CL')} / día sobre la meta` 
+                  : `- $${Math.abs(resumenCafeteriaDiaria.diferenciaDiaria).toLocaleString('es-CL')} / día para la meta`}
+              </div>
+            </article>
+
             <div className="grid gap-6 md:grid-cols-2">
               <article className="p-7 rounded-3xl border border-slate-200 bg-white shadow-sm space-y-6 flex flex-col justify-between">
                 <div>
@@ -888,7 +1283,7 @@ export default function VentasDiarias() {
                   </div>
                 </div>
               </article>
-
+              
               <article className="p-7 rounded-3xl border border-slate-200 bg-white shadow-sm space-y-6 flex flex-col justify-between">
                 <div>
                   <h4 className="font-black text-slate-900 text-sm flex items-center gap-2">
@@ -922,6 +1317,97 @@ export default function VentasDiarias() {
                 </div>
               </article>
             </div>
+
+            {/* 📈 GRÁFICO DE LÍNEAS ESTABLE CON VALORES VISIBLES */}
+            <article className="p-7 rounded-3xl border border-slate-200 bg-white shadow-sm space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                    <BarChart3 size={18} className="text-[#C5A059]" /> Tendencia de Ingresos Diarios (Últimos 14 Días)
+                  </h4>
+                  <p className="text-xs text-slate-400 font-medium mt-0.5">Valores y montos brutos visibles directamente sobre cada punto</p>
+                </div>
+              </div>
+
+              {/* Contenedor h-96 limpio y sin parpadeo */}
+              <div className="h-96 w-full pt-16 pb-6 px-4 relative flex flex-col justify-between border-b border-slate-200">
+                
+                {/* Líneas de guía horizontales de fondo */}
+                <div className="absolute inset-x-4 top-16 bottom-16 flex flex-col justify-between pointer-events-none opacity-30">
+                  <div className="border-b border-dashed border-slate-300 w-full"></div>
+                  <div className="border-b border-dashed border-slate-300 w-full"></div>
+                  <div className="border-b border-dashed border-slate-300 w-full"></div>
+                  <div className="border-b border-dashed border-slate-300 w-full"></div>
+                </div>
+
+                <div className="relative h-64 w-full my-auto">
+                  <svg className="w-full h-full overflow-visible" viewBox="0 0 1000 200" preserveAspectRatio="none">
+                    <defs>
+                      <linearGradient id="gradLiniaStable" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#C5A059" stopOpacity="0.3" />
+                        <stop offset="100%" stopColor="#C5A059" stopOpacity="0.0" />
+                      </linearGradient>
+                    </defs>
+
+                    {(() => {
+                      const points = ingresosDiariosLinea.resultado.map((item, idx) => {
+                        const x = (idx / (ingresosDiariosLinea.resultado.length - 1)) * 1000
+                        const y = 180 - (ingresosDiariosLinea.maxMonto > 0 ? (item.monto / ingresosDiariosLinea.maxMonto) * 150 : 0)
+                        return { x, y, ...item }
+                      })
+
+                      const pathD = points.reduce((acc, p, idx) => `${acc} ${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`, '')
+                      const areaD = `${pathD} L 1000 200 L 0 200 Z`
+
+                      return (
+                        <>
+                          <path d={areaD} fill="url(#gradLiniaStable)" />
+                          <path d={pathD} fill="none" stroke="#C5A059" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+
+                          {points.map((p, idx) => {
+                            const montoFormateado = p.monto > 0 ? `$${p.monto.toLocaleString('es-CL')}` : '$0'
+                            return (
+                              <g key={idx}>
+                                <circle 
+                                  cx={p.x} 
+                                  cy={p.y} 
+                                  r="5.5" 
+                                  fill="#181818" 
+                                  stroke="#C5A059" 
+                                  strokeWidth="3"
+                                />
+                                <text 
+                                  x={p.x} 
+                                  y={p.y - 10} 
+                                  textAnchor="middle" 
+                                  fill="#1e293b" 
+                                  fontSize="9" 
+                                  fontWeight="900"
+                                  fontFamily="monospace"
+                                >
+                                  {montoFormateado}
+                                </text>
+                              </g>
+                            )
+                          })}
+                        </>
+                      )
+                    })()}
+                  </svg>
+                </div>
+
+                {/* Eje X de fechas */}
+                <div className="flex justify-between items-center pt-6 px-1 text-[11px] font-black text-slate-600">
+                  {ingresosDiariosLinea.resultado.map((item, idx) => (
+                    <div key={idx} className="flex flex-col items-center">
+                      <span className="cursor-default">{item.etiqueta}</span>
+                    </div>
+                  ))}
+                </div>
+
+              </div>
+            </article>
+
           </div>
         )}
       </div>
