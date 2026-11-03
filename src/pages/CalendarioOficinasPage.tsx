@@ -14,69 +14,91 @@ interface EventoReserva {
 }
 
 export default function CalendarioOficinasPage() {
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 9, 12)) // Octubre 2026
+  // 🌟 CORREGIDO: Usar new Date() nativo para que tome siempre el mes y año actual de forma dinámica
+  const [currentDate, setCurrentDate] = useState(new Date())
   const [eventos, setEventos] = useState<EventoReserva[]>([])
-  const [_loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [vista, setVista] = useState<'mes' | 'semana'>('mes')
   
   const [reservaParaCancelar, setReservaParaCancelar] = useState<EventoReserva | null>(null)
   const [isCanceling, setIsCanceling] = useState(false)
 
+  // 🚀 Carga optimizada filtrando por el mes y año visible en pantalla
   const fetchReservas = async () => {
     setLoading(true)
-    
-    const { data: particulares } = await supabase
-      .from('uso_oficinas_particulares')
-      .select('id, oficina_asignada, hora_inicio, hora_fin, fecha_inicio, estado_pago, clientes_particulares(nombre_completo)')
-      .neq('estado_pago', 'Cancelado')
-    
-    const { data: empresas } = await supabase
-      .from('oficinas_fisicas')
-      .select('id, tipo_espacio, nombre_cliente, fecha_inicio, estado')
-      .eq('estado', 'Activo')
+    const year = currentDate.getFullYear()
+    const month = currentDate.getMonth() + 1 // 1 al 12
 
-    const listaEventos: EventoReserva[] = []
-    if (particulares) {
-      particulares.forEach((p: any) => {
-        if (p.fecha_inicio) {
-          listaEventos.push({
-            id: p.id,
-            oficina: p.oficina_asignada,
-            cliente: p.clientes_particulares?.nombre_completo || 'Cliente Particular',
-            horaInicio: p.hora_inicio?.substring(0, 5),
-            horaFin: p.hora_fin?.substring(0, 5),
-            tipo: 'particular',
-            fecha: p.fecha_inicio,
-            estadoPago: p.estado_pago
-          })
-        }
-      })
+    const primerDiaMes = `${year}-${String(month).padStart(2, '0')}-01`
+    const ultimoDiaMes = new Date(year, month, 0).toISOString().split('T')[0]
+
+    try {
+      const { data: particulares, error: errPart } = await supabase
+        .from('uso_oficinas_particulares')
+        .select('id, oficina_asignada, hora_inicio, hora_fin, fecha_inicio, estado_pago, clientes_particulares(nombre_completo)')
+        .neq('estado_pago', 'Cancelado')
+        .gte('fecha_inicio', primerDiaMes)
+        .lte('fecha_inicio', ultimoDiaMes)
+
+      if (errPart) console.error('Error particulares:', errPart.message)
+
+      const { data: empresas } = await supabase
+        .from('oficinas_fisicas')
+        .select('id, tipo_espacio, nombre_cliente, fecha_inicio, estado')
+        .eq('estado', 'Activo')
+
+      const listaEventos: EventoReserva[] = []
+
+      if (particulares) {
+        particulares.forEach((p: any) => {
+          if (p.fecha_inicio) {
+            const fechaLimpia = p.fecha_inicio.split('T')[0]
+            listaEventos.push({
+              id: p.id,
+              oficina: p.oficina_asignada,
+              cliente: p.clientes_particulares?.nombre_completo || 'Cliente Particular',
+              horaInicio: p.hora_inicio?.substring(0, 5),
+              horaFin: p.hora_fin?.substring(0, 5),
+              tipo: 'particular',
+              fecha: fechaLimpia,
+              estadoPago: p.estado_pago
+            })
+          }
+        })
+      }
+
+      if (empresas) {
+        empresas.forEach((e: any) => {
+          if (e.fecha_inicio) {
+            const fechaLimpia = e.fecha_inicio.split('T')[0]
+            listaEventos.push({
+              id: e.id,
+              oficina: e.tipo_espacio,
+              cliente: e.nombre_cliente,
+              tipo: 'empresa',
+              fecha: fechaLimpia
+            })
+          }
+        })
+      }
+
+      setEventos(listaEventos)
+    } catch (error: any) {
+      console.error('Error general al cargar reservas:', error.message)
+    } finally {
+      setLoading(false)
     }
-    if (empresas) {
-      empresas.forEach((e: any) => {
-        if (e.fecha_inicio) {
-          listaEventos.push({
-            id: e.id,
-            oficina: e.tipo_espacio,
-            cliente: e.nombre_cliente,
-            tipo: 'empresa',
-            fecha: e.fecha_inicio
-          })
-        }
-      })
-    }
-    setEventos(listaEventos)
-    setLoading(false)
   }
 
   useEffect(() => {
-    fetchReservas()
+    void fetchReservas()
   }, [currentDate])
 
   const confirmarCancelacion = async () => {
     if (!reservaParaCancelar) return
     setIsCanceling(true)
     const { id, tipo } = reservaParaCancelar
+
     if (tipo === 'particular') {
       const { error } = await supabase
         .from('uso_oficinas_particulares')
@@ -89,8 +111,9 @@ export default function CalendarioOficinasPage() {
           horas_calculadas: 0
         })
         .eq('id', id)
+
       if (!error) {
-        fetchReservas()
+        void fetchReservas()
       } else {
         setEventos(prev => prev.filter(e => e.id !== id))
       }
@@ -99,12 +122,14 @@ export default function CalendarioOficinasPage() {
         .from('oficinas_fisicas')
         .update({ estado: 'Cancelado' })
         .eq('id', id)
+
       if (!error) {
-        fetchReservas()
+        void fetchReservas()
       } else {
         alert('Error al actualizar el estado: ' + error.message)
       }
     }
+
     setIsCanceling(false)
     setReservaParaCancelar(null)
   }
@@ -134,21 +159,21 @@ export default function CalendarioOficinasPage() {
   const firstDayIndex = new Date(year, month, 1).getDay()
   const totalDays = new Date(year, month + 1, 0).getDate()
   const adjustedFirstDay = (firstDayIndex + 6) % 7
-  
+
   const getStartOfWeek = (d: Date) => {
     const date = new Date(d)
     const day = date.getDay()
     const diff = date.getDate() - day + (day === 0 ? -6 : 1)
     return new Date(date.setDate(diff))
   }
-  
+
   const startOfWeek = getStartOfWeek(currentDate)
   const diasSemana = Array.from({ length: 7 }).map((_, i) => {
     const d = new Date(startOfWeek)
     d.setDate(d.getDate() + i)
     return d
   })
-  
+
   const horas = Array.from({ length: 13 }).map((_, i) => `${String(8 + i).padStart(2, '0')}:00`)
   const monthNames = [
     'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -169,6 +194,7 @@ export default function CalendarioOficinasPage() {
         
         <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold">
           <button 
+            type="button"
             onClick={() => setVista('mes')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
               vista === 'mes' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
@@ -177,6 +203,7 @@ export default function CalendarioOficinasPage() {
             <Grid size={14} /> Mensual
           </button>
           <button 
+            type="button"
             onClick={() => setVista('semana')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
               vista === 'semana' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
@@ -190,6 +217,7 @@ export default function CalendarioOficinasPage() {
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
         <div className="flex items-center justify-between border-b border-slate-100 pb-4">
           <button 
+            type="button"
             onClick={prevPeriod}
             className="flex items-center gap-1 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
           >
@@ -201,12 +229,19 @@ export default function CalendarioOficinasPage() {
               : `Semana del ${startOfWeek.getDate()} de ${monthNames[startOfWeek.getMonth()]} ${startOfWeek.getFullYear()}`}
           </h2>
           <button 
+            type="button"
             onClick={nextPeriod}
             className="flex items-center gap-1 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
           >
             Siguiente <ChevronRight size={16} />
           </button>
         </div>
+
+        {loading && (
+          <div className="flex items-center justify-center py-4 text-xs font-bold text-amber-600 gap-2">
+            <LoaderCircle size={16} className="animate-spin" /> Actualizando calendario...
+          </div>
+        )}
 
         {vista === 'mes' ? (
           <div className="space-y-4">
@@ -244,6 +279,7 @@ export default function CalendarioOficinasPage() {
                               {r.oficina} {r.estadoPago === 'Pendiente' && '⏳'}
                             </span>
                             <button 
+                              type="button"
                               onClick={() => setReservaParaCancelar(r)}
                               className="text-rose-500 opacity-0 group-hover:opacity-100 hover:text-rose-700 p-0.5 transition"
                               title="Liberar / cancelar reserva"
@@ -310,6 +346,7 @@ export default function CalendarioOficinasPage() {
                               <div className="flex justify-between items-center font-bold">
                                 <span className="truncate">{r.oficina}</span>
                                 <button 
+                                  type="button"
                                   onClick={() => setReservaParaCancelar(r)}
                                   className="text-rose-600 opacity-0 group-hover:opacity-100 hover:text-rose-800 transition"
                                   title="Liberar / cancelar reserva"
