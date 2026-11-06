@@ -37,6 +37,14 @@ import IngresosBancoChilePage from './pages/IngresosBancoChilePage'
 import TraspasosRetirosPage from './pages/TraspasosRetirosPage'
 import EstadoResultadosPage from './pages/EstadoResultadosPage'
 
+// Páginas del Módulo de Recursos Humanos (RRHH)
+import ResumenRRHHPage from './pages/ResumenRRHHPage'
+import TrabajadoresPage from './pages/TrabajadoresPage'
+import PracticantesPage from './pages/PracticantesPage'
+import ExternosPage from './pages/ExternosPage'
+import DocumentosRRHHPage from './pages/DocumentosRRHHPage'
+import ReportesRRHHPage from './pages/ReportesRRHHPage'
+
 // Lazy loading para páginas secundarias
 const Contratos = lazy(() => import('./pages/Contratos'))
 const ContratoEditor = lazy(() => import('./pages/ContratoEditor'))
@@ -97,7 +105,6 @@ function App() {
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/login" element={<Login />} />
-
         <Route element={<TrustedDeviceGate />}>
           <Route element={<MainLayout />}>
             
@@ -137,6 +144,9 @@ function App() {
                 <Route path="/finanzas/banco-chile" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
                 <Route path="/finanzas/estado-resultados" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
 
+                {/* Redirecciones de RRHH para rol limitado */}
+                <Route path="/rrhh/*" element={<Navigate to="/oficinas-fisicas/particulares" replace />} />
+
                 <Route path="/oficinas-fisicas/particulares" element={<ClientesParticularesPage />} />
                 <Route path="/oficinas-fisicas/calendario" element={<CalendarioOficinasPage />} />
               </>
@@ -171,7 +181,7 @@ function App() {
                     <PlantillaContrato />
                   </Suspense>
                 } />
-
+                
                 <Route path="/catering/dashboard" element={<CateringClientesPage />} />
                 <Route path="/catering/clientes" element={<CateringClientesPage />} />
                 <Route path="/catering/pedidos" element={<CateringPedidosPage />} />
@@ -202,6 +212,15 @@ function App() {
                 <Route path="/finanzas/traspasos" element={<TraspasosRetirosPage />} />
                 <Route path="/finanzas/banco-chile" element={<IngresosBancoChilePage />} />
                 <Route path="/finanzas/estado-resultados" element={<EstadoResultadosPage />} />
+
+                {/* RUTAS SEPARADAS PARA CADA PESTAÑA DE RECURSOS HUMANOS */}
+                <Route path="/rrhh" element={<Navigate to="/rrhh/resumen" replace />} />
+                <Route path="/rrhh/resumen" element={<ResumenRRHHPage />} />
+                <Route path="/rrhh/trabajadores" element={<TrabajadoresPage />} />
+                <Route path="/rrhh/practicantes" element={<PracticantesPage />} />
+                <Route path="/rrhh/externos" element={<ExternosPage />} />
+                <Route path="/rrhh/documentos" element={<DocumentosRRHHPage />} />
+                <Route path="/rrhh/reportes" element={<ReportesRRHHPage />} />
               </>
             )}
 

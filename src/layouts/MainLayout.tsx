@@ -20,7 +20,10 @@ import {
   PieChart,
   Users,
   Calculator,
-  Calendar as CalendarIcon
+  Calendar as CalendarIcon,
+  Briefcase,
+  UserCheck,
+  GraduationCap
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
@@ -50,7 +53,6 @@ const navigationOficinasFisicas = [
   { label: 'Reportes', to: '/oficinas-fisicas/reportes', icon: BarChart3 },
 ]
 
-// Menú exclusivo limitado para rol OfFisica
 const navigationOficinasFisicasLimitada = [
   { label: 'Clientes particulares', to: '/oficinas-fisicas/particulares', icon: Users, end: true },
   { label: 'Calendario de oficinas', to: '/oficinas-fisicas/calendario', icon: CalendarIcon },
@@ -78,6 +80,16 @@ const navigationFinanzas = [
   { label: 'Estado de Resultados', to: '/finanzas/estado-resultados', icon: PieChart },
 ]
 
+// 5. Navegación del módulo de Recursos Humanos (RRHH)
+const navigationRRHH = [
+  { label: 'Panel general', to: '/rrhh/resumen', icon: Briefcase, end: true },
+  { label: 'Trabajadores', to: '/rrhh/trabajadores', icon: Users },
+  { label: 'Practicantes', to: '/rrhh/practicantes', icon: GraduationCap },
+  { label: 'Personal externo', to: '/rrhh/externos', icon: UserCheck },
+  { label: 'Documentos y alertas', to: '/rrhh/documentos', icon: FileText },
+  { label: 'Reportes', to: '/rrhh/reportes', icon: BarChart3 },
+]
+
 export default function MainLayout() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -90,6 +102,7 @@ export default function MainLayout() {
   
   const [userEmail, setUserEmail] = useState<string>('')
   const [isOfFisicaOnly, setIsOfFisicaOnly] = useState<boolean>(false)
+  const [isRRHHOnly, setIsRRHHOnly] = useState<boolean>(false)
   
   const alertCount = notificationFeed.alerts.length
 
@@ -105,12 +118,19 @@ export default function MainLayout() {
           .eq('user_id', session.user.id)
         
         const hasOfFisica = roleData?.some((r) => r.role === 'OfFisica')
+        const hasRRHH = roleData?.some((r) => r.role === 'rrhh')
         const isGenericOffice = email.toLowerCase() === 'oficinassutrato@zohomail.com'
+
         if (hasOfFisica || isGenericOffice) {
           setIsOfFisicaOnly(true)
           const rutasPermitidas = ['/oficinas-fisicas/particulares', '/oficinas-fisicas/calendario']
           if (!rutasPermitidas.includes(location.pathname)) {
             navigate('/oficinas-fisicas/particulares', { replace: true })
+          }
+        } else if (hasRRHH || email.toLowerCase() === 'coni@sutrato.com') {
+          setIsRRHHOnly(true)
+          if (!location.pathname.startsWith('/rrhh')) {
+            navigate('/rrhh/resumen', { replace: true })
           }
         }
       }
@@ -124,7 +144,9 @@ export default function MainLayout() {
       ? 'fisicas' 
       : location.pathname.startsWith('/catering')
         ? 'catering'
-        : 'oficinas'
+        : location.pathname.startsWith('/rrhh')
+          ? 'rrhh'
+          : 'oficinas'
 
   const loadNotifications = useCallback(async () => {
     setIsLoadingNotifications(true)
@@ -174,31 +196,37 @@ export default function MainLayout() {
 
   function openNotification() {
     setIsNotificationsOpen(false)
-    navigate(isOfFisicaOnly ? '/oficinas-fisicas/particulares' : '/documentos')
+    navigate(isOfFisicaOnly ? '/oficinas-fisicas/particulares' : isRRHHOnly ? '/rrhh/resumen' : '/documentos')
   }
 
-  const handleModuleSwitch = (module: 'oficinas' | 'fisicas' | 'catering' | 'finanzas') => {
-    if (isOfFisicaOnly) return
+  const handleModuleSwitch = (module: 'oficinas' | 'fisicas' | 'catering' | 'finanzas' | 'rrhh') => {
+    if (isOfFisicaOnly || isRRHHOnly) return
     if (module === 'oficinas') {
       navigate('/dashboard')
     } else if (module === 'fisicas') {
       navigate('/oficinas-fisicas/resumen')
     } else if (module === 'catering') {
       navigate('/catering/dashboard')
-    } else {
+    } else if (module === 'finanzas') {
       navigate('/finanzas/panel-general')
+    } else {
+      navigate('/rrhh/resumen')
     }
   }
 
   const activeNavigation = isOfFisicaOnly
     ? navigationOficinasFisicasLimitada
-    : currentModule === 'oficinas' 
-      ? navigationOficinas 
-      : currentModule === 'fisicas' 
-        ? navigationOficinasFisicas 
-        : currentModule === 'catering'
-          ? navigationCatering
-          : navigationFinanzas
+    : isRRHHOnly
+      ? navigationRRHH
+      : currentModule === 'oficinas' 
+        ? navigationOficinas 
+        : currentModule === 'fisicas' 
+          ? navigationOficinasFisicas 
+          : currentModule === 'catering'
+            ? navigationCatering
+            : currentModule === 'rrhh'
+              ? navigationRRHH
+              : navigationFinanzas
 
   const userInitials = userEmail ? userEmail.substring(0, 2).toUpperCase() : 'US'
 
@@ -216,17 +244,20 @@ export default function MainLayout() {
           <div>
             <p className="text-sm font-bold tracking-tight text-white">SUTRATO</p>
             <p className="text-xs text-slate-400">
-              {currentModule === 'oficinas' 
-                ? 'Gestor Administrativo' 
-                : currentModule === 'fisicas' 
-                  ? 'Oficinas Físicas' 
-                  : currentModule === 'catering'
-                    ? 'Coffee & Catering'
-                    : 'Control financiero'}
+              {isRRHHOnly
+                ? 'Recursos Humanos'
+                : currentModule === 'oficinas' 
+                  ? 'Gestor Administrativo' 
+                  : currentModule === 'fisicas' 
+                    ? 'Oficinas Físicas' 
+                    : currentModule === 'catering'
+                      ? 'Coffee & Catering'
+                      : currentModule === 'rrhh'
+                        ? 'Recursos Humanos'
+                        : 'Control financiero'}
             </p>
           </div>
         </div>
-
         <nav aria-label="Navegación principal" className="flex-1 space-y-1.5 px-3 py-6">
           {activeNavigation.map(({ label, to, icon: Icon, end }) => {
             const isItemActive = end ? location.pathname === to : location.pathname.startsWith(to)
@@ -247,27 +278,25 @@ export default function MainLayout() {
             )
           })}
         </nav>
-
         <div className="m-4 rounded-2xl border border-[#333333] bg-[#1f1f1f] p-4 shadow-inner">
           <p className="text-xs font-bold text-slate-200">PROTOTIPO</p>
           <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-            Preparado para futura integración automática con bancos y medios de pago.
+            Módulos integrados y sincronizados con base de datos.
           </p>
         </div>
       </aside>
-
       <div className="md:pl-64">
         
-        {/* HEADER SUPERIOR CON EL TONO EXACTO */}
+        {/* HEADER SUPERIOR CON EL TONO EXACTO Y EL BOTÓN DE RRHH */}
         <header className="app-navbar sticky top-0 z-30 flex h-20 items-center justify-between gap-4 border-b border-amber-900/15 bg-[#F0E6D2]/95 px-4 backdrop-blur sm:px-8 print:hidden shadow-sm">
           
           <div className="flex items-center gap-4">
-            {!isOfFisicaOnly && (
-              <div className="flex bg-amber-900/10 p-1 rounded-xl border border-amber-900/15">
+            {!isOfFisicaOnly && !isRRHHOnly && (
+              <div className="flex bg-amber-900/10 p-1 rounded-xl border border-amber-900/15 overflow-x-auto">
                 <button 
                   type="button"
                   onClick={() => handleModuleSwitch('oficinas')}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all shrink-0 ${
                     currentModule === 'oficinas' ? 'bg-white shadow-sm text-slate-900 font-semibold' : 'text-slate-700 hover:text-slate-900'
                   }`}
                 >
@@ -276,7 +305,7 @@ export default function MainLayout() {
                 <button 
                   type="button"
                   onClick={() => handleModuleSwitch('fisicas')}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all shrink-0 ${
                     currentModule === 'fisicas' ? 'bg-white shadow-sm text-slate-900 font-semibold' : 'text-slate-700 hover:text-slate-900'
                   }`}
                 >
@@ -285,7 +314,7 @@ export default function MainLayout() {
                 <button 
                   type="button"
                   onClick={() => handleModuleSwitch('catering')}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all shrink-0 ${
                     currentModule === 'catering' ? 'bg-white shadow-sm text-orange-900 font-semibold' : 'text-slate-700 hover:text-slate-900'
                   }`}
                 >
@@ -294,15 +323,24 @@ export default function MainLayout() {
                 <button 
                   type="button"
                   onClick={() => handleModuleSwitch('finanzas')}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all shrink-0 ${
                     currentModule === 'finanzas' ? 'bg-white shadow-sm text-amber-900 font-semibold' : 'text-slate-700 hover:text-slate-900'
                   }`}
                 >
                   Finanzas
                 </button>
+                <button 
+                  type="button"
+                  onClick={() => handleModuleSwitch('rrhh')}
+                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all shrink-0 ${
+                    currentModule === 'rrhh' ? 'bg-white shadow-sm text-amber-950 font-bold' : 'text-slate-700 hover:text-slate-900'
+                  }`}
+                >
+                  Recursos Humanos
+                </button>
               </div>
             )}
-
+            
             <div ref={notificationsRef} className="relative">
               <button
                 type="button"
@@ -361,7 +399,6 @@ export default function MainLayout() {
               )}
             </div>
           </div>
-
           <div className="flex items-center gap-3">
             <div className="hidden h-8 w-px bg-amber-900/15 sm:block" />
             <div className="flex items-center gap-3">
@@ -370,7 +407,7 @@ export default function MainLayout() {
               </div>
               <div className="hidden sm:block">
                 <p className="text-sm font-semibold leading-5 text-slate-900">{userEmail || 'gerencia@sutrato.com'}</p>
-                <p className="text-xs leading-4 text-slate-600">{isOfFisicaOnly ? 'Oficina Física' : 'Usuario activo'}</p>
+                <p className="text-xs leading-4 text-slate-600">{isOfFisicaOnly ? 'Oficina Física' : isRRHHOnly ? 'Recursos Humanos' : 'Usuario activo'}</p>
               </div>
             </div>
           </div>
@@ -400,12 +437,10 @@ export default function MainLayout() {
           </div>
         </nav>
 
-        {/* 🚀 CONTENIDO PRINCIPAL CON EL TONO AMARILLO EXACTO DE TU CAPTURA */}
+        {/* CONTENIDO PRINCIPAL */}
         <main 
           className="min-h-[calc(100vh-5rem)] min-w-0 p-4 sm:p-8 print:min-h-0 print:p-0 [&_h1]:text-amber-900 [&_h1]:font-black [&_h2]:text-amber-900 [&_h2]:font-bold"
-          style={{
-            backgroundColor: '#F5EEDB'
-          }}
+          style={{ backgroundColor: '#F5EEDB' }}
         >
           <Outlet />
         </main>

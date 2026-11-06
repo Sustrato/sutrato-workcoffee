@@ -15,7 +15,6 @@ export default function TrustedDeviceGate() {
 
   const checkDevice = useCallback(async () => {
     const currentRequestId = ++requestId.current
-
     try {
       const { data, error: sessionError } = await supabase.auth.getSession()
       if (sessionError) throw sessionError
@@ -24,8 +23,9 @@ export default function TrustedDeviceGate() {
         return
       }
 
-      // --- BYPASS TOTAL PARA CORREO DE OFICINA O ROL OFICIAL ---
-      if (data.session.user.email?.toLowerCase() === 'oficinassutrato@zohomail.com') {
+      // --- BYPASS TOTAL PARA CORREO DE OFICINA, RRHH O ROL OFICIAL ---
+      const userEmail = data.session.user.email?.toLowerCase() ?? ''
+      if (userEmail === 'oficinassutrato@zohomail.com' || userEmail === 'coni@sutrato.com') {
         setStatus('verified')
         return
       }
@@ -36,8 +36,8 @@ export default function TrustedDeviceGate() {
         .eq('user_id', data.session.user.id)
 
       if (!roleError && roleData) {
-        const hasOfFisicaRole = roleData.some((r) => r.role === 'OfFisica')
-        if (hasOfFisicaRole) {
+        const hasValidRole = roleData.some((r) => r.role === 'OfFisica' || r.role === 'rrhh')
+        if (hasValidRole) {
           setStatus('verified')
           return
         }
@@ -50,9 +50,11 @@ export default function TrustedDeviceGate() {
         setStatus('verified')
         return
       }
+
       if (!result.verificationRequired || !result.challengeId) {
         throw new Error('El servicio no devolvió una verificación válida para este dispositivo.')
       }
+
       isRedirectingToVerification.current = true
       const { error: signOutError } = await supabase.auth.signOut()
       if (signOutError) throw signOutError
@@ -68,19 +70,21 @@ export default function TrustedDeviceGate() {
     } catch (checkError) {
       if (requestId.current !== currentRequestId) return
       
-      // Si ocurre un error (como fallo de SMTP), revisamos si el usuario actual es de oficina física
+      // Si ocurre un error (como fallo de SMTP), revisamos si el usuario actual tiene bypass
       try {
         const { data: sessionData } = await supabase.auth.getSession()
-        if (sessionData?.session?.user?.email?.toLowerCase() === 'oficinassutrato@zohomail.com') {
+        const backupEmail = sessionData?.session?.user?.email?.toLowerCase() ?? ''
+        if (backupEmail === 'oficinassutrato@zohomail.com' || backupEmail === 'coni@sutrato.com') {
           setStatus('verified')
           return
         }
+
         const { data: roleData } = await supabase
           .from('user_roles')
           .select('role')
           .eq('user_id', sessionData?.session?.user?.id ?? '')
         
-        if (roleData?.some((r) => r.role === 'OfFisica')) {
+        if (roleData?.some((r) => r.role === 'OfFisica' || r.role === 'rrhh')) {
           setStatus('verified')
           return
         }
@@ -108,6 +112,7 @@ export default function TrustedDeviceGate() {
   }, [checkDevice, navigate])
 
   if (status === 'verified') return <Outlet />
+
   if (status === 'checking') {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
@@ -115,6 +120,7 @@ export default function TrustedDeviceGate() {
       </main>
     )
   }
+
   if (status === 'error') {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8">
@@ -123,7 +129,7 @@ export default function TrustedDeviceGate() {
           <p className="mt-2 text-sm text-rose-700">{error}</p>
           <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button type="button" onClick={() => void supabase.auth.signOut()} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600">Cerrar sesión</button>
-            <button type="button" onClick={() => { setStatus('checking'); setError(''); void checkDevice() }} className="h-10 rounded-lg bg-primary-600 px-4 text-sm font-semibold text-white hover:bg-primary-700">Reintentar</button>
+            <button type="button" onClick={() => { setStatus('checking'); setError(''); void checkDevice() }} className="h-10 rounded-lg bg-amber-600 px-4 text-sm font-semibold text-white hover:bg-amber-700">Reintentar</button>
           </div>
         </section>
       </main>
