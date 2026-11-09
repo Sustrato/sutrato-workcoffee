@@ -325,7 +325,7 @@ export default function MainLayout() {
                     currentModule === 'catering' ? 'bg-white shadow-sm text-orange-900 font-semibold' : 'text-slate-700 hover:text-slate-900'
                   }`}
                 >
-                  Coffee & Catering
+                  Catering
                 </button>
                 <button 
                   type="button"
