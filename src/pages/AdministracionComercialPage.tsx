@@ -6,36 +6,23 @@ import { QRCodeSVG } from 'qrcode.react'
 
 const BUCKET_NAME = 'documentos_oficinas'
 
-// Función para eliminar puntos, guiones y espacios
+// 📌 Función para eliminar puntos, guiones y espacios al guardar en base de datos
 const normalizarRut = (valor: string) => {
   if (!valor) return ''
   return valor.toLowerCase().replace(/[\.\-\s]/g, '')
 }
 
-// 📌 Validador real de RUT chileno (Módulo 11)
-const validarRutChileno = (rutCompleto: string) => {
-  if (!rutCompleto) return false;
-  const valor = rutCompleto.replace(/\./g, '').trim();
-  if (!valor.includes('-')) return false;
+// 📌 Validador flexible y limpio (sin variables sin usar para evitar advertencias de TS)
+const validarRutChilenoFlexible = (rutCompleto: string) => {
+  if (!rutCompleto) return false
+  const limpio = rutCompleto.replace(/[\.\-\s]/g, '').toLowerCase()
   
-  const partes = valor.split('-');
-  if (partes.length !== 2) return false;
-  
-  let cuerpo = partes[0];
-  let dv = partes[1].toLowerCase();
-  
-  if (!/^\d+$/.test(cuerpo)) return false;
-  if (cuerpo.length < 7 || cuerpo.length > 8) return false;
-  let suma = 0;
-  let multiplo = 2;
-  for (let i = cuerpo.length - 1; i >= 0; i--) {
-    suma += parseInt(cuerpo.charAt(i)) * multiplo;
-    multiplo = multiplo < 7 ? multiplo + 1 : 2;
-  }
-  let dvEsperado = 11 - (suma % 11);
-  let dvCalculado = dvEsperado === 11 ? '0' : dvEsperado === 10 ? 'k' : dvEsperado.toString();
-  return dvCalculado === dv;
-};
+  // Si tiene menos de 5 o más de 12 caracteres, descartar
+  if (limpio.length < 5 || limpio.length > 12) return false
+
+  // De forma flexible aceptamos cualquier formato válido (tanto RUTs nacionales como extranjeros o pasaportes)
+  return true
+}
 
 export default function AdministracionComercialPage() {
   const navigate = useNavigate()
@@ -53,8 +40,8 @@ export default function AdministracionComercialPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [empresaAEliminar, setEmpresaAEliminar] = useState<any>(null)
   const [textoConfirmacion, setTextoConfirmacion] = useState('')
-
-  // Sistema de Notificaciones Flotantes (Toast) profesional en lugar de alert()
+  
+  // Sistema de Notificaciones Flotantes (Toast)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const mostrarToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type })
@@ -63,7 +50,7 @@ export default function AdministracionComercialPage() {
     }, 4000)
   }
 
-  // Estados de Edición y Doble Click
+  // Estados de Edición
   const [editingId, setEditingId] = useState<string | null>(null)
   const [savingEmpresa, setSavingEmpresa] = useState(false)
   
@@ -196,8 +183,8 @@ export default function AdministracionComercialPage() {
   }
 
   const handleConfirmarEliminar = async () => {
-    if (textoConfirmacion !== 'ELIMINAR') {
-      return mostrarToast('Debes escribir "ELIMINAR" en mayúsculas para confirmar.', 'error')
+    if (textoConfirmacion.trim().toUpperCase() !== 'ELIMINAR') {
+      return mostrarToast('Debes escribir "ELIMINAR" para confirmar.', 'error')
     }
     const { error } = await supabase.from('oficinas_fisicas').delete().eq('id', empresaAEliminar.id)
     if (!error) {
@@ -292,11 +279,11 @@ export default function AdministracionComercialPage() {
     if (!empresa.trim() || !rutEmpresa.trim()) {
       return mostrarToast('Completa los campos obligatorios (*)', 'error')
     }
-    if (!validarRutChileno(rutEmpresa)) {
-      return mostrarToast('El RUT de la empresa no es válido (Ej: 76123456-7)', 'error')
+    if (!validarRutChilenoFlexible(rutEmpresa)) {
+      return mostrarToast('El formato del RUT/Identificador de la empresa no es válido', 'error')
     }
-    if (rutRepresentante.trim() && !validarRutChileno(rutRepresentante)) {
-      return mostrarToast('El RUT del representante legal no es válido (Ej: 12345678-9)', 'error')
+    if (rutRepresentante.trim() && !validarRutChilenoFlexible(rutRepresentante)) {
+      return mostrarToast('El formato del RUT/Identificador del representante no es válido', 'error')
     }
     if (correo.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
       return mostrarToast('El formato del correo electrónico no es válido', 'error')
@@ -319,7 +306,7 @@ export default function AdministracionComercialPage() {
       monto_mensual: Number(montoMensual) || 0,
       vigencia,
     }
-    let error;
+    let error
     if (editingId) {
       const res = await supabase
         .from('oficinas_fisicas')
@@ -638,7 +625,7 @@ export default function AdministracionComercialPage() {
                 </button>
                 <button 
                   type="button"
-                  disabled={textoConfirmacion !== 'ELIMINAR'}
+                  disabled={textoConfirmacion.trim().toUpperCase() !== 'ELIMINAR'}
                   onClick={handleConfirmarEliminar}
                   className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-6 py-2.5 rounded-xl shadow transition disabled:opacity-40 disabled:cursor-not-allowed text-xs"
                 >
@@ -684,7 +671,7 @@ export default function AdministracionComercialPage() {
         </div>
       )}
 
-      {/* MODAL 1: NUEVA / EDITAR EMPRESA CON LIMITADORES Y VALIDACIONES */}
+      {/* MODAL 1: NUEVA / EDITAR EMPRESA */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl border border-slate-100">
@@ -711,13 +698,13 @@ export default function AdministracionComercialPage() {
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">RUT empresa * (Ej: 76123456-7)</label>
+                  <label className="block font-bold text-slate-700 mb-1">RUT / ID empresa * (Ej: 78.869.385-3 o Extranjero)</label>
                   <input 
                     type="text" 
                     value={rutEmpresa} 
                     onChange={(e) => setRutEmpresa(e.target.value)} 
-                    placeholder="76123456-7"
-                    maxLength={12}
+                    placeholder="78869385-3"
+                    maxLength={20}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]" 
                     required 
                   />
@@ -734,13 +721,13 @@ export default function AdministracionComercialPage() {
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">RUT representante (Ej: 12345678-9)</label>
+                  <label className="block font-bold text-slate-700 mb-1">RUT / ID representante</label>
                   <input 
                     type="text" 
                     value={rutRepresentante} 
                     onChange={(e) => setRutRepresentante(e.target.value)} 
-                    placeholder="12345678-9"
-                    maxLength={12}
+                    placeholder="9036545-7"
+                    maxLength={20}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]" 
                   />
                 </div>

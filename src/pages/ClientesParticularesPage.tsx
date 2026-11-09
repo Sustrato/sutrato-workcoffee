@@ -96,10 +96,13 @@ export default function ClientesParticularesPage() {
   const [rutEmpresa, setRutEmpresa] = useState('')
   const [obsCliente, setObsCliente] = useState('')
   
+  // 📌 Fecha actual mínima permitida (hoy en adelante)
+  const hoyStr = new Date().toISOString().split('T')[0]
+
   const [clienteSeleccionadoId, setClienteSeleccionadoId] = useState('')
   const [oficina, setOficina] = useState('Oficina 1')
-  const [fechaIngreso, setFechaIngreso] = useState(new Date().toISOString().split('T')[0])
-  const [fechaTermino, setFechaTermino] = useState(new Date().toISOString().split('T')[0])
+  const [fechaIngreso, setFechaIngreso] = useState(hoyStr)
+  const [fechaTermino, setFechaTermino] = useState(hoyStr)
   const [modalidad, setModalidad] = useState('Por hora')
   
   const [historialVisitasCliente, setHistorialVisitasCliente] = useState<UsoOficina[]>([])
@@ -140,11 +143,9 @@ export default function ClientesParticularesPage() {
     'Oficina 5', 'Oficina 6', 'Oficina 7', 
     'Sala de Reuniones A', 'Sala de Reuniones B'
   ]
-
   const [reservasDelDiaModal, setReservasDelDiaModal] = useState<any[]>([])
 
   const calcularOficinasLibres = async () => {
-    const hoyStr = new Date().toISOString().split('T')[0]
     const ahora = new Date()
     const horaActualStr = ahora.toLocaleTimeString('es-CL', {
       timeZone: 'America/Santiago',
@@ -152,7 +153,6 @@ export default function ClientesParticularesPage() {
       minute: '2-digit',
       hour12: false
     })
-
     const { data: empresasActivas } = await supabase
       .from('oficinas_fisicas')
       .select('tipo_espacio')
@@ -163,7 +163,6 @@ export default function ClientesParticularesPage() {
       .select('oficina_asignada, hora_inicio, hora_fin, estado_pago')
       .eq('fecha_inicio', hoyStr)
       .neq('estado_pago', 'Cancelado')
-
     const ocupadas = new Set<string>()
     empresasActivas?.forEach(e => ocupadas.add(e.tipo_espacio))
     
@@ -178,7 +177,6 @@ export default function ClientesParticularesPage() {
         }
       }
     })
-
     const libres = listaTodasOficinas.filter(of => !ocupadas.has(of))
     setOficinasLibresAhora(libres)
   }
@@ -216,7 +214,7 @@ export default function ClientesParticularesPage() {
   const [voucherActualUrl, setVoucherActualUrl] = useState<string>('')
   const [uploadingVoucher, setUploadingVoucher] = useState(false)
   const [basesAceptadas, setBasesAceptadas] = useState(false)
-  const [fechaAceptacion, setFechaAceptacion] = useState(new Date().toISOString().split('T')[0])
+  const [fechaAceptacion, setFechaAceptacion] = useState(hoyStr)
   
   const [oficinasBloqueadas, setOficinasBloqueadas] = useState<string[]>([])
   const [detallesBloqueo, setDetallesBloqueo] = useState<Record<string, string>>({})
@@ -289,6 +287,8 @@ export default function ClientesParticularesPage() {
   useEffect(() => {
     if (isArriendoModalOpen && !editingVisitaId) {
       cargarHoraActualChile()
+      setFechaIngreso(hoyStr)
+      setFechaTermino(hoyStr)
     }
   }, [isArriendoModalOpen])
 
@@ -317,6 +317,8 @@ export default function ClientesParticularesPage() {
     setFormaPago('Transferencia')
     setIniciadoPorVisita('Damián')
     setCobradoPorVisita('')
+    setFechaIngreso(hoyStr)
+    setFechaTermino(hoyStr)
   }
 
   const handleAbrirEditarCliente = (c: ClienteParticular) => {
@@ -427,8 +429,8 @@ export default function ClientesParticularesPage() {
   const handleSeleccionarVisitaParaEditar = (visita: UsoOficina) => {
     setEditingVisitaId(visita.id)
     setOficina(visita.oficina_asignada || 'Oficina 1')
-    setFechaIngreso(visita.fecha_inicio || new Date().toISOString().split('T')[0])
-    setFechaTermino(visita.fecha_fin || new Date().toISOString().split('T')[0])
+    setFechaIngreso(visita.fecha_inicio || hoyStr)
+    setFechaTermino(visita.fecha_fin || hoyStr)
     
     const hIn = visita.hora_inicio || '09:00'
     const hOut = visita.hora_fin || '10:00'
@@ -483,7 +485,6 @@ export default function ClientesParticularesPage() {
       .neq('estado_pago', 'Cancelado')
     
     setReservasDelDiaModal(reservasCruzadas || [])
-
     const bloqueos: Record<string, string> = {}
     if (empresasActivas) {
       empresasActivas.forEach(e => {
@@ -504,7 +505,6 @@ export default function ClientesParticularesPage() {
           } else {
             hayTraslape = horaIngreso < rFin && horaSalida > rInicio
           }
-
           if (hayTraslape) {
             bloqueos[r.oficina_asignada] = `Ocupada (${rInicio} - ${rFin} hrs / ${r.estado_pago})`
           }
@@ -629,7 +629,6 @@ export default function ClientesParticularesPage() {
         .getPublicUrl(filePath)
       finalVoucherUrl = publicURLData.publicUrl
     }
-
     const payloadArriendo: any = {
       cliente_id: clienteSeleccionadoId,
       oficina_asignada: oficina,
@@ -652,7 +651,6 @@ export default function ClientesParticularesPage() {
       cobrado_por: cobradoPorVisita || null,
       voucher_url: finalVoucherUrl || null
     }
-
     let error
     if (editingVisitaId) {
       const res = await supabase.from('uso_oficinas_particulares').update(payloadArriendo).eq('id', editingVisitaId)
@@ -672,11 +670,9 @@ export default function ClientesParticularesPage() {
     }
   }
 
-  // 🟢 CONTADOR DE 24 HORAS HASTA EL INICIO DE LA RESERVA (SOLO PARA ESTADOS "Reservado")
   const evaluarPlazoCancelacion = (visita: UsoOficina) => {
     if (visita.estado_pago !== 'Reservado') return null
     if (!visita.fecha_inicio || !visita.hora_inicio) return null
-
     const hInicioLimpia = visita.hora_inicio.substring(0, 5)
     const fechaHoraInicioStr = `${visita.fecha_inicio}T${hInicioLimpia}:00`
     const inicioReserva = new Date(fechaHoraInicioStr).getTime()
@@ -685,10 +681,8 @@ export default function ClientesParticularesPage() {
       return { valido: false, texto: 'Fecha de inicio no válida' }
     }
     
-    // El límite para cancelar con devolución es exactamente 24 horas ANTES de que inicie la reserva
     const limiteCancelacion = inicioReserva - (24 * 60 * 60 * 1000)
     const ahora = new Date().getTime()
-    
     const diffMs = limiteCancelacion - ahora
     
     if (diffMs <= 0) {
@@ -719,7 +713,6 @@ export default function ClientesParticularesPage() {
   })
 
   const totalHorasAcumuladas = historialVisitasCliente.reduce((acc, curr) => acc + (Number(curr.horas_calculadas) || 0), 0)
-
   const reservasOficinaSeleccionadaHoy = reservasDelDiaModal.filter(r => r.oficina_asignada === oficina)
 
   return (
@@ -747,7 +740,7 @@ export default function ClientesParticularesPage() {
           )}
         </div>
       )}
-
+      
       {/* Encabezado */}
       <section className="flex justify-between items-center">
         <div>
@@ -1252,9 +1245,7 @@ export default function ClientesParticularesPage() {
                               📅 {visita.fecha_inicio} ({visita.hora_inicio} - {visita.hora_fin}) — <strong className="text-slate-700">{visita.oficina_asignada} [{visita.horas_calculadas}h]</strong> 
                               <span className="block text-[10px] text-slate-500">Inició: {visita.iniciado_por || '—'} | Cobró: {visita.cobrado_por || 'Aún no se cobra'}</span>
                             </span>
-
                             <div className="flex flex-wrap items-center gap-2">
-                              {/* 🟢 CONTADOR DE MARGEN DE 24H ANTES DEL INICIO DE RESERVA */}
                               {estadoPlazo && (
                                 <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[10px] font-bold ${
                                   estadoPlazo.valido 
@@ -1264,7 +1255,6 @@ export default function ClientesParticularesPage() {
                                   {estadoPlazo.valido ? `🟢 ${estadoPlazo.texto}` : `🔴 ${estadoPlazo.texto}`}
                                 </span>
                               )}
-
                               {visita.voucher_url ? (
                                 <button 
                                   type="button"
@@ -1361,14 +1351,31 @@ export default function ClientesParticularesPage() {
                     <option value="Tarjeta de Débito/Crédito">Tarjeta de Débito/Crédito</option>
                   </select>
                 </div>
+                
+                {/* 📌 RESTRICCIÓN DE FECHAS: min={hoyStr} para evitar fechas pasadas */}
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Fecha ingreso *</label>
-                  <input type="date" value={fechaIngreso} onChange={(e) => setFechaIngreso(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
+                  <input 
+                    type="date" 
+                    value={fechaIngreso} 
+                    min={hoyStr}
+                    onChange={(e) => setFechaIngreso(e.target.value)} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" 
+                    required 
+                  />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Fecha término *</label>
-                  <input type="date" value={fechaTermino} onChange={(e) => setFechaTermino(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" required />
+                  <input 
+                    type="date" 
+                    value={fechaTermino} 
+                    min={hoyStr}
+                    onChange={(e) => setFechaTermino(e.target.value)} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none" 
+                    required 
+                  />
                 </div>
+
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Estado del pago</label>
                   <select 
@@ -1412,7 +1419,6 @@ export default function ClientesParticularesPage() {
                       required 
                     />
                   </div>
-
                   {showPautaIngreso && (
                     <div className="absolute left-0 mt-1 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 z-50 space-y-3 animate-fade-in">
                       <div className="flex justify-between items-center border-b pb-2">
@@ -1463,7 +1469,6 @@ export default function ClientesParticularesPage() {
                       required 
                     />
                   </div>
-
                   {showPautaSalida && (
                     <div className="absolute left-0 mt-1 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 z-50 space-y-3 animate-fade-in">
                       <div className="flex justify-between items-center border-b pb-2">
@@ -1621,7 +1626,13 @@ export default function ClientesParticularesPage() {
                 {basesAceptadas && (
                   <div className="pt-1">
                     <label className="block font-bold text-slate-700 mb-1">Fecha de aceptación</label>
-                    <input type="date" value={fechaAceptacion} onChange={(e) => setFechaAceptacion(e.target.value)} className="px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none" />
+                    <input 
+                      type="date" 
+                      value={fechaAceptacion} 
+                      min={hoyStr}
+                      onChange={(e) => setFechaAceptacion(e.target.value)} 
+                      className="px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none" 
+                    />
                   </div>
                 )}
               </div>
