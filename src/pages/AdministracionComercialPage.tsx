@@ -26,18 +26,14 @@ const validarRutChileno = (rutCompleto: string) => {
   
   if (!/^\d+$/.test(cuerpo)) return false;
   if (cuerpo.length < 7 || cuerpo.length > 8) return false;
-
   let suma = 0;
   let multiplo = 2;
-
   for (let i = cuerpo.length - 1; i >= 0; i--) {
     suma += parseInt(cuerpo.charAt(i)) * multiplo;
     multiplo = multiplo < 7 ? multiplo + 1 : 2;
   }
-
   let dvEsperado = 11 - (suma % 11);
   let dvCalculado = dvEsperado === 11 ? '0' : dvEsperado === 10 ? 'k' : dvEsperado.toString();
-
   return dvCalculado === dv;
 };
 
@@ -60,7 +56,6 @@ export default function AdministracionComercialPage() {
 
   // Sistema de Notificaciones Flotantes (Toast) profesional en lugar de alert()
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
-
   const mostrarToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type })
     setTimeout(() => {
@@ -291,37 +286,25 @@ export default function AdministracionComercialPage() {
     }
   }
 
-  // 📌 Guardar con validaciones estrictas y protección contra doble click
   const handleGuardarEmpresa = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (savingEmpresa) return // Bloqueo anti doble clic
-
-    // Validaciones básicas de campos obligatorios
+    if (savingEmpresa) return
     if (!empresa.trim() || !rutEmpresa.trim()) {
       return mostrarToast('Completa los campos obligatorios (*)', 'error')
     }
-
-    // 📌 Validar formato y validez del RUT empresa
     if (!validarRutChileno(rutEmpresa)) {
       return mostrarToast('El RUT de la empresa no es válido (Ej: 76123456-7)', 'error')
     }
-
-    // 📌 Si ingresaron RUT representante, validarlo también
     if (rutRepresentante.trim() && !validarRutChileno(rutRepresentante)) {
       return mostrarToast('El RUT del representante legal no es válido (Ej: 12345678-9)', 'error')
     }
-
-    // 📌 Validar Correo si fue ingresado
     if (correo.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
       return mostrarToast('El formato del correo electrónico no es válido', 'error')
     }
-
     if (oficinasOcupadas.includes(tipoEspacio)) {
       return mostrarToast(`La ${tipoEspacio} ya se encuentra ocupada por un contrato activo.`, 'error')
     }
-
     setSavingEmpresa(true)
-
     const payload = {
       nombre_cliente: empresa.trim(),
       rut_empresa: normalizarRut(rutEmpresa),
@@ -336,7 +319,6 @@ export default function AdministracionComercialPage() {
       monto_mensual: Number(montoMensual) || 0,
       vigencia,
     }
-
     let error;
     if (editingId) {
       const res = await supabase
@@ -355,9 +337,7 @@ export default function AdministracionComercialPage() {
         }])
       error = res.error
     }
-
     setSavingEmpresa(false)
-
     if (!error) {
       mostrarToast(editingId ? '¡Empresa actualizada con éxito!' : '¡Empresa guardada con éxito!')
       setIsModalOpen(false)
@@ -378,7 +358,6 @@ export default function AdministracionComercialPage() {
       const url = await uploadFile(comprobanteFile)
       if (url) urlComprobante = url
     }
-
     const payloadPago: any = {
       empresa_id: empresaSeleccionada.id,
       fecha_pago: fechaPago,
@@ -394,7 +373,6 @@ export default function AdministracionComercialPage() {
     if (urlComprobante) {
       payloadPago.comprobante_url = urlComprobante
     }
-
     let errPago = null
     if (editingPagoId) {
       const { error } = await supabase
@@ -407,7 +385,6 @@ export default function AdministracionComercialPage() {
         .from('pagos_oficinas_fisicas')
         .insert([payloadPago])
       errPago = error
-
       await supabase.from('ventas_diarias').insert([
         {
           fecha: fechaPago,
@@ -419,7 +396,6 @@ export default function AdministracionComercialPage() {
         }
       ])
     }
-
     const { error: errEmpresa } = await supabase
       .from('oficinas_fisicas')
       .update({
@@ -427,7 +403,6 @@ export default function AdministracionComercialPage() {
         vigencia: 'VIGENTE'
       })
       .eq('id', empresaSeleccionada.id)
-
     setUploading(false)
     if (!errPago && !errEmpresa) {
       mostrarToast(editingPagoId ? '¡Pago actualizado con éxito!' : '¡Pago registrado con éxito!')
@@ -549,12 +524,12 @@ export default function AdministracionComercialPage() {
                   </td>
                   <td className="py-4 px-4">
                     <div className="flex flex-col gap-1 items-start">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${
                         a.terminos_aceptados 
                           ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
                           : 'bg-amber-100 text-amber-800 border border-amber-200'
                       }`}>
-                        {a.terminos_aceptados ? '• Aceptado' : '• Pendiente'}
+                        <span>•</span> {a.terminos_aceptados ? 'Aceptado' : 'Pendiente'}
                       </span>
                       <button
                         onClick={() => handleAbrirQr(a)}
@@ -573,12 +548,12 @@ export default function AdministracionComercialPage() {
                     </div>
                   </td>
                   <td className="py-4 px-4 text-center">
-                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
+                    <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${
                       a.vigencia === 'NO VIGENTE' 
                         ? 'bg-rose-100 text-rose-800 border border-rose-200' 
                         : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                     }`}>
-                      • {a.vigencia || 'VIGENTE'}
+                      <span>•</span> {a.vigencia || 'VIGENTE'}
                     </span>
                   </td>
                   <td className="py-4 px-4 text-center">

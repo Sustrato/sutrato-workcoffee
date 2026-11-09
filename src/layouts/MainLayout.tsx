@@ -23,7 +23,8 @@ import {
   Calendar as CalendarIcon,
   Briefcase,
   UserCheck,
-  GraduationCap
+  GraduationCap,
+  LogOut
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
@@ -120,7 +121,6 @@ export default function MainLayout() {
         const hasOfFisica = roleData?.some((r) => r.role === 'OfFisica')
         const hasRRHH = roleData?.some((r) => r.role === 'rrhh')
         const isGenericOffice = email.toLowerCase() === 'oficinassutrato@zohomail.com'
-
         if (hasOfFisica || isGenericOffice) {
           setIsOfFisicaOnly(true)
           const rutasPermitidas = ['/oficinas-fisicas/particulares', '/oficinas-fisicas/calendario']
@@ -214,6 +214,12 @@ export default function MainLayout() {
     }
   }
 
+  // 📌 Función para cerrar sesión
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    navigate('/login', { replace: true })
+  }
+
   const activeNavigation = isOfFisicaOnly
     ? navigationOficinasFisicasLimitada
     : isRRHHOnly
@@ -285,9 +291,10 @@ export default function MainLayout() {
           </p>
         </div>
       </aside>
+
       <div className="md:pl-64">
         
-        {/* HEADER SUPERIOR CON EL TONO EXACTO Y EL BOTÓN DE RRHH */}
+        {/* HEADER SUPERIOR CON EL BOTÓN DE CERRAR SESIÓN */}
         <header className="app-navbar sticky top-0 z-30 flex h-20 items-center justify-between gap-4 border-b border-amber-900/15 bg-[#F0E6D2]/95 px-4 backdrop-blur sm:px-8 print:hidden shadow-sm">
           
           <div className="flex items-center gap-4">
@@ -399,6 +406,7 @@ export default function MainLayout() {
               )}
             </div>
           </div>
+
           <div className="flex items-center gap-3">
             <div className="hidden h-8 w-px bg-amber-900/15 sm:block" />
             <div className="flex items-center gap-3">
@@ -410,6 +418,16 @@ export default function MainLayout() {
                 <p className="text-xs leading-4 text-slate-600">{isOfFisicaOnly ? 'Oficina Física' : isRRHHOnly ? 'Recursos Humanos' : 'Usuario activo'}</p>
               </div>
             </div>
+
+            {/* 📌 Botón de Cerrar Sesión */}
+            <button
+              onClick={handleLogout}
+              title="Cerrar sesión"
+              className="flex items-center gap-1.5 ml-2 px-3 py-1.5 rounded-lg border border-amber-900/20 bg-white/60 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700 text-slate-700 text-xs font-bold transition shadow-sm"
+            >
+              <LogOut size={15} />
+              <span className="hidden md:inline">Salir</span>
+            </button>
           </div>
         </header>
 
