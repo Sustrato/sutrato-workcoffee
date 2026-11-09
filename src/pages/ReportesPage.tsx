@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
-import { Download, Search, Calendar, Filter } from 'lucide-react'
+import { Download, Search, Calendar, Filter, ArrowUpDown } from 'lucide-react'
 
 interface ReporteUnificado {
   id: string
@@ -18,11 +18,12 @@ export default function ReportesPage() {
   const [datosReporte, setDatosReporte] = useState<ReporteUnificado[]>([])
   const [loading, setLoading] = useState(false)
   
-  // 🔍 Filtros avanzados
+  // 🔍 Filtros avanzados y Criterio de Orden
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedEstado, setSelectedEstado] = useState('Todos')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
+  const [ordenamiento, setOrdenamiento] = useState('fecha_reciente') // 'fecha_reciente' | 'fecha_antigua' | 'nombre_asc' | 'nombre_desc'
 
   const fetchTodosLosIngresos = async () => {
     setLoading(true)
@@ -75,9 +76,6 @@ export default function ReportesPage() {
       })
     }
 
-    // 📌 Ordenar siempre de la fecha más reciente a la más antigua por defecto
-    listaUnificada.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
-
     setDatosReporte(listaUnificada)
     setLoading(false)
   }
@@ -105,6 +103,20 @@ export default function ReportesPage() {
     }
 
     return matchTexto && matchEstado && matchFecha
+  })
+
+  // 🔄 Ordenamiento dinámico según lo que elija el usuario
+  datosFiltrados.sort((a, b) => {
+    if (ordenamiento === 'fecha_reciente') {
+      return new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
+    } else if (ordenamiento === 'fecha_antigua') {
+      return new Date(a.fecha).getTime() - new Date(b.fecha).getTime()
+    } else if (ordenamiento === 'nombre_asc') {
+      return a.nombre.localeCompare(b.nombre)
+    } else if (ordenamiento === 'nombre_desc') {
+      return b.nombre.localeCompare(a.nombre)
+    }
+    return 0
   })
 
   // 🧮 Cálculos globales ajustados quitando el IVA correctamente (Bruto / 1.19)
@@ -168,8 +180,8 @@ export default function ReportesPage() {
         </button>
       </div>
 
-      {/* 🔍 Filtros avanzados */}
-      <section className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
+      {/* 🔍 Filtros avanzados y Ordenamiento */}
+      <section className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm grid grid-cols-1 sm:grid-cols-5 gap-4 text-xs">
         <div>
           <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
             <Search size={13} className="text-[#C5A059]" /> Buscar por nombre o RUT
@@ -197,6 +209,22 @@ export default function ReportesPage() {
             <option value="Pagado">Pagado</option>
             <option value="VIGENTE">Vigente</option>
             <option value="NO VIGENTE">No Vigente</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+            <ArrowUpDown size={13} className="text-[#C5A059]" /> Ordenar por
+          </label>
+          <select
+            value={ordenamiento}
+            onChange={(e) => setOrdenamiento(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059] bg-white font-medium cursor-pointer text-slate-900 font-bold"
+          >
+            <option value="fecha_reciente">📅 Fecha: Más reciente</option>
+            <option value="fecha_antigua">📅 Fecha: Más antigua</option>
+            <option value="nombre_asc">🔤 Nombre: A - Z</option>
+            <option value="nombre_desc">🔤 Nombre: Z - A</option>
           </select>
         </div>
 
