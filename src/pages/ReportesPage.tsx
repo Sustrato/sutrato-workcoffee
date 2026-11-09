@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
-import { Download, Search } from 'lucide-react'
+import { Download, Search, Calendar, Filter } from 'lucide-react'
 
 interface ReporteUnificado {
   id: string
@@ -18,10 +18,11 @@ export default function ReportesPage() {
   const [datosReporte, setDatosReporte] = useState<ReporteUnificado[]>([])
   const [loading, setLoading] = useState(false)
   
-  // Filtros por Año, Mes y Buscador
-  const [selectedAnio, setSelectedAnio] = useState('Todos los años')
-  const [selectedMes, setSelectedMes] = useState('Todos los meses')
+  // 🔍 Filtros avanzados
   const [searchTerm, setSearchTerm] = useState('')
+  const [selectedEstado, setSelectedEstado] = useState('Todos')
+  const [fechaDesde, setFechaDesde] = useState('')
+  const [fechaHasta, setFechaHasta] = useState('')
 
   const fetchTodosLosIngresos = async () => {
     setLoading(true)
@@ -47,8 +48,8 @@ export default function ReportesPage() {
           nombre: e.nombre_cliente || 'Sin nombre',
           rut: e.rut_empresa || 'Sin RUT',
           tipo: 'Empresa Mensual',
-          estado: e.estado || 'Activo',
-          frecuencia: 'Mensual',
+          estado: e.vigencia || e.estado || 'Activo',
+          frecuencia: e.frecuencia || 'Mensual',
           fecha: e.fecha_inicio || '',
           recaudacion: monto,
           comision: comision
@@ -74,6 +75,9 @@ export default function ReportesPage() {
       })
     }
 
+    // 📌 Ordenar siempre de la fecha más reciente a la más antigua por defecto
+    listaUnificada.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
+
     setDatosReporte(listaUnificada)
     setLoading(false)
   }
@@ -82,31 +86,25 @@ export default function ReportesPage() {
     fetchTodosLosIngresos()
   }, [])
 
-  const anosDisponibles = ['Todos los años', '2026', '2025', '2024']
-  const mesesDisponibles = [
-    'Todos los meses', 'Enero', 'Febrero', 'Marzo', 'Abril', 
-    'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 
-    'Octubre', 'Noviembre', 'Diciembre'
-  ]
-
-  const mesANumero: Record<string, string> = {
-    'Enero': '01', 'Febrero': '02', 'Marzo': '03', 'Abril': '04',
-    'Mayo': '05', 'Junio': '06', 'Julio': '07', 'Agosto': '08',
-    'Septiembre': '09', 'Octubre': '10', 'Noviembre': '11', 'Diciembre': '12'
-  }
-
+  // 🔎 Filtrado inteligente (Nombre/RUT, Estado y Rango de Fechas)
   const datosFiltrados = datosReporte.filter((item) => {
-    const fecha = item.fecha || ''
-    const anioItem = fecha.substring(0, 4)
-    const mesItem = fecha.substring(5, 7)
-    
-    const matchAnio = selectedAnio === 'Todos los años' || anioItem === selectedAnio
-    const matchMes = selectedMes === 'Todos los meses' || mesItem === mesANumero[selectedMes]
     const matchTexto = 
       item.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.rut.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.frecuencia.toLowerCase().includes(searchTerm.toLowerCase())
-    return matchAnio && matchMes && matchTexto
+      item.rut.toLowerCase().includes(searchTerm.toLowerCase())
+    
+    const matchEstado = 
+      selectedEstado === 'Todos' || 
+      item.estado.toLowerCase() === selectedEstado.toLowerCase()
+
+    let matchFecha = true
+    if (fechaDesde && item.fecha) {
+      matchFecha = matchFecha && item.fecha >= fechaDesde
+    }
+    if (fechaHasta && item.fecha) {
+      matchFecha = matchFecha && item.fecha <= fechaHasta
+    }
+
+    return matchTexto && matchEstado && matchFecha
   })
 
   // 🧮 Cálculos globales ajustados quitando el IVA correctamente (Bruto / 1.19)
@@ -140,13 +138,14 @@ export default function ReportesPage() {
         utilidad
       ].join(',')
     })
+
     const csvContent = [headers.join(','), ...rows].join('\r\n')
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     
     const link = document.createElement('a')
     link.setAttribute('href', url)
-    link.setAttribute('download', `reporte_general_sutrato_${selectedAnio}_${selectedMes}.csv`)
+    link.setAttribute('download', `reporte_general_sutrato_${new Date().toISOString().split('T')[0]}.csv`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -156,57 +155,73 @@ export default function ReportesPage() {
     <div className="mx-auto max-w-7xl space-y-7 font-sans">
       
       {/* Encabezado */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Reportes</h1>
           <p className="mt-1 text-sm text-slate-500">Resumen comercial unificado (Empresas y Clientes Particulares)</p>
         </div>
         <button 
           onClick={exportarCSV}
-          className="flex items-center gap-2 bg-[#C5A059] hover:bg-[#b59049] text-slate-950 font-bold px-4 py-2 rounded-lg text-xs shadow transition cursor-pointer"
+          className="flex items-center gap-2 bg-[#C5A059] hover:bg-[#b59049] text-slate-950 font-bold px-4 py-2 rounded-lg text-xs shadow transition cursor-pointer whitespace-nowrap"
         >
           <Download size={15} /> Exportar CSV por columnas
         </button>
       </div>
 
-      {/* 🔍 Filtros */}
-      <section className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+      {/* 🔍 Filtros avanzados */}
+      <section className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
         <div>
-          <label className="block font-bold text-slate-700 mb-1">Año</label>
+          <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+            <Search size={13} className="text-[#C5A059]" /> Buscar por nombre o RUT
+          </label>
+          <input
+            type="text"
+            placeholder="Ej. Juan Pérez o RUT..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]"
+          />
+        </div>
+
+        <div>
+          <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+            <Filter size={13} className="text-[#C5A059]" /> Estado
+          </label>
           <select
-            value={selectedAnio}
-            onChange={(e) => setSelectedAnio(e.target.value)}
+            value={selectedEstado}
+            onChange={(e) => setSelectedEstado(e.target.value)}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059] bg-white font-medium cursor-pointer"
           >
-            {anosDisponibles.map(anio => (
-              <option key={anio} value={anio}>{anio}</option>
-            ))}
+            <option value="Todos">Todos los estados</option>
+            <option value="Activo">Activo</option>
+            <option value="Pagado">Pagado</option>
+            <option value="VIGENTE">Vigente</option>
+            <option value="NO VIGENTE">No Vigente</option>
           </select>
         </div>
+
         <div>
-          <label className="block font-bold text-slate-700 mb-1">Mes</label>
-          <select
-            value={selectedMes}
-            onChange={(e) => setSelectedMes(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059] bg-white font-medium cursor-pointer"
-          >
-            {mesesDisponibles.map(mes => (
-              <option key={mes} value={mes}>{mes}</option>
-            ))}
-          </select>
+          <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+            <Calendar size={13} className="text-[#C5A059]" /> Desde fecha
+          </label>
+          <input
+            type="date"
+            value={fechaDesde}
+            onChange={(e) => setFechaDesde(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]"
+          />
         </div>
+
         <div>
-          <label className="block font-bold text-slate-700 mb-1">Buscar cliente o empresa</label>
-          <div className="relative">
-            <Search className="absolute left-3 top-2.5 text-slate-400" size={15} />
-            <input
-              type="text"
-              placeholder="Nombre o RUT..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]"
-            />
-          </div>
+          <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+            <Calendar size={13} className="text-[#C5A059]" /> Hasta fecha
+          </label>
+          <input
+            type="date"
+            value={fechaHasta}
+            onChange={(e) => setFechaHasta(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C5A059]"
+          />
         </div>
       </section>
 
@@ -253,7 +268,7 @@ export default function ReportesPage() {
                 </tr>
               ) : datosFiltrados.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-8 text-slate-400 font-medium">No hay registros financieros para este periodo.</td>
+                  <td colSpan={8} className="text-center py-8 text-slate-400 font-medium">No hay registros financieros para este filtro.</td>
                 </tr>
               ) : (
                 datosFiltrados.map((item) => {
@@ -272,12 +287,14 @@ export default function ReportesPage() {
                       <td className="py-3.5 px-4 font-medium text-slate-700">{item.frecuencia}</td>
                       <td className="py-3.5 px-4">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          item.estado === 'Activo' || item.estado === 'Pagado' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                          item.estado === 'Activo' || item.estado === 'Pagado' || item.estado === 'VIGENTE' 
+                            ? 'bg-emerald-100 text-emerald-800' 
+                            : 'bg-rose-100 text-rose-800'
                         }`}>
                           {item.estado}
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 text-slate-600">{item.fecha}</td>
+                      <td className="py-3.5 px-4 text-slate-600">{item.fecha || '—'}</td>
                       <td className="py-3.5 px-4 text-right font-bold text-slate-900">${monto.toLocaleString('es-CL')}</td>
                       <td className="py-3.5 px-4 text-right text-slate-600">${ivaItem.toLocaleString('es-CL')}</td>
                       <td className="py-3.5 px-4 text-right text-amber-700 font-semibold">${comisionItem.toLocaleString('es-CL')}</td>
