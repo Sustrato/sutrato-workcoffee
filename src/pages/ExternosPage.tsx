@@ -1,101 +1,542 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { FormEvent } from 'react'
 import { supabase } from '../services/supabase'
 
 const EXTERNAL_STATUSES = ['Activo', 'Finalizado', 'Inactivo']
-const TYPES_DOCS = ['Boleta de honorarios', 'Comprobante de pago', 'Contrato de prestación', 'Informe de trabajo', 'Orden de compra', 'Otro documento']
+
+const TYPES_DOCS = [
+  'Boleta de honorarios',
+  'Comprobante de pago',
+  'Contrato de prestación',
+  'Informe de trabajo',
+  'Orden de compra',
+  'Otro documento'
+]
+
+const DOC_COLUMNS =
+  'id, person_id, type, date, expiry, note, file_name'
+
+const inputClass =
+  'w-full mt-1 p-2.5 border rounded-xl bg-white font-normal'
+
+const buttonClass =
+  'px-3 py-1.5 bg-[#eee8db] rounded-xl font-bold text-xs disabled:opacity-50 disabled:cursor-not-allowed'
+
+const primaryClass =
+  'px-4 py-2 bg-[#d9b354] rounded-xl text-xs font-bold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed'
+
+const dangerClass =
+  'px-3 py-1.5 bg-[#fae3e1] text-[#932c2c] rounded-xl font-bold text-xs disabled:opacity-50 disabled:cursor-not-allowed'
+
+type ModalType =
+  | 'agregar'
+  | 'editar'
+  | 'perfil'
+  | 'agregarDoc'
+  | null
+
+function today() {
+  const date = new Date()
+
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0')
+  ].join('-')
+}
+
+function sameId(a: unknown, b: unknown) {
+  return String(a) === String(b)
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message
+
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error
+  ) {
+    return String(error.message)
+  }
+
+  return 'Ocurrió un error inesperado.'
+}
+
+function emptyDocument() {
+  return {
+    type: TYPES_DOCS[0],
+    date: today(),
+    expiry: '',
+    note: ''
+  }
+}
+
+function getPersonForm(person: any = {}) {
+  return {
+    name: person.name || '',
+    rut: person.rut || '',
+    email: person.email || '',
+    phone: person.phone || '',
+    role: person.role || '',
+    status: person.status || 'Activo',
+    notes: person.notes || ''
+  }
+}
+
+function readFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+      } else {
+        reject(new Error('No se pudo leer el archivo.'))
+      }
+    }
+
+    reader.onerror = () => {
+      reject(reader.error || new Error('Error leyendo el archivo.'))
+    }
+
+    reader.onabort = () => {
+      reject(new Error('La lectura del archivo fue cancelada.'))
+    }
+
+    reader.readAsDataURL(file)
+  })
+}
+
+function dataUrlToBlob(dataUrl: string) {
+  const comma = dataUrl.indexOf(',')
+
+  if (!dataUrl.startsWith('data:') || comma < 0) {
+    throw new Error('El archivo guardado tiene un formato inválido.')
+  }
+
+  const header = dataUrl.slice(0, comma)
+  const content = dataUrl.slice(comma + 1)
+
+  const mime =
+    header.match(/^data:([^;,]+)/)?.[1] ||
+    'application/octet-stream'
+
+  if (!header.includes(';base64')) {
+    return new Blob([decodeURIComponent(content)], { type: mime })
+  }
+
+  const binary = atob(content)
+  const bytes = new Uint8Array(binary.length)
+
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+
+  return new Blob([bytes], { type: mime })
+}
 
 export default function ExternosPage() {
   const [people, setPeople] = useState<any[]>([])
   const [docs, setDocs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  
+  const [pageError, setPageError] = useState('')
+
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
 
-  // Modales
-  const [modalType, setModalType] = useState<'agregar' | 'editar' | 'perfil' | 'agregarDoc' | null>(null)
+  const [modalType, setModalType] = useState<ModalType>(null)
   const [selectedPerson, setSelectedPerson] = useState<any>(null)
-  const [formValues, setFormValues] = useState<any>({})
-  const [docValues, setDocValues] = useState<any>({ type: TYPES_DOCS[0], date: new Date().toISOString().split('T')[0] })
+  const [formValues, setFormValues] = useState<any>(getPersonForm())
+
+  const [docValues, setDocValues] = useState(emptyDocument)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+
+  const [busy, setBusy] = useState('')
+  const operationRef = useRef(false)
+
+  const [downloadingId, setDownloadingId] = useState<string | null>(
+    null
+  )
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchData()
+    void fetchData()
   }, [])
 
-  const fetchData = async () => {
+  async function fetchData() {
     setLoading(true)
-    const { data: peopleData } = await supabase.from('rrhh_personas').select('*').eq('type', 'externos')
-    const { data: docsData } = await supabase.from('rrhh_documentos').select('*')
-    if (peopleData) setPeople(peopleData)
-    if (docsData) setDocs(docsData)
-    setLoading(false)
-  }
+    setPageError('')
 
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const { error } = await supabase.from('rrhh_personas').insert([{ type: 'externos', ...formValues }])
-    if (!error) {
-      setModalType(null)
-      setFormValues({})
-      fetchData()
+    try {
+      const peopleResult = await supabase
+        .from('rrhh_personas')
+        .select('*')
+        .eq('type', 'externos')
+
+      if (peopleResult.error) throw peopleResult.error
+
+      const nextPeople = peopleResult.data || []
+      const nextDocs: any[] = []
+
+      // Cargamos solo metadatos, sin file_data.
+      for (let i = 0; i < nextPeople.length; i += 100) {
+        const personIds = nextPeople
+          .slice(i, i + 100)
+          .map(person => person.id)
+
+        // Paginamos los documentos de cada lote.
+        const pageSize = 500
+
+        for (let offset = 0; ; offset += pageSize) {
+          const docsResult = await supabase
+            .from('rrhh_documentos')
+            .select(DOC_COLUMNS)
+            .in('person_id', personIds)
+            .order('id', { ascending: true })
+            .range(offset, offset + pageSize - 1)
+
+          if (docsResult.error) throw docsResult.error
+
+          const batch = docsResult.data || []
+          nextDocs.push(...batch)
+
+          if (batch.length < pageSize) break
+        }
+      }
+
+      setPeople(nextPeople)
+      setDocs(nextDocs)
+    } catch (error) {
+      console.error('Error cargando personal externo:', error)
+      setPageError(getErrorMessage(error))
+    } finally {
+      setLoading(false)
     }
   }
 
-  const handleUpdate = async (e: React.FormEvent) => {
+  function beginOperation(text: string) {
+    if (operationRef.current) return false
+
+    operationRef.current = true
+    setBusy(text)
+    return true
+  }
+
+  function finishOperation() {
+    operationRef.current = false
+    setBusy('')
+  }
+
+  function closeModal() {
+    if (operationRef.current) return
+
+    setModalType(null)
+    setSelectedFile(null)
+  }
+
+  function openAdd() {
+    setSelectedPerson(null)
+    setFormValues(getPersonForm())
+    setModalType('agregar')
+  }
+
+  function openEdit(person: any) {
+    setSelectedPerson(person)
+    setFormValues(getPersonForm(person))
+    setModalType('editar')
+  }
+
+  function openAddDocument() {
+    setDocValues(emptyDocument())
+    setSelectedFile(null)
+    setModalType('agregarDoc')
+  }
+
+  async function handleSavePerson(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    const { error } = await supabase.from('rrhh_personas').update(formValues).eq('id', selectedPerson.id)
-    if (!error) {
+
+    const editing = modalType === 'editar'
+
+    if (editing && !selectedPerson) return
+    if (!beginOperation('Guardando perfil...')) return
+
+    try {
+      const payload = getPersonForm(formValues)
+
+      if (editing) {
+        const { error } = await supabase
+          .from('rrhh_personas')
+          .update(payload)
+          .eq('id', selectedPerson.id)
+          .eq('type', 'externos')
+          .select('id')
+          .single()
+
+        if (error) throw error
+
+        setPeople(current =>
+          current.map(person =>
+            sameId(person.id, selectedPerson.id)
+              ? { ...person, ...payload }
+              : person
+          )
+        )
+
+        setSelectedPerson((current: any) =>
+          current ? { ...current, ...payload } : null
+        )
+      } else {
+        const { data, error } = await supabase
+          .from('rrhh_personas')
+          .insert([{
+            ...payload,
+            type: 'externos'
+          }])
+          .select('*')
+          .single()
+
+        if (error) throw error
+
+        setPeople(current => [...current, data])
+      }
+
       setModalType(null)
-      setSelectedPerson(null)
-      fetchData()
+      setFormValues(getPersonForm())
+    } catch (error) {
+      console.error('Error guardando personal externo:', error)
+      alert(`No se pudo guardar: ${getErrorMessage(error)}`)
+    } finally {
+      finishOperation()
     }
   }
 
-  const filtered = people.filter((p: any) => {
-    const matchSearch = [p.name, p.rut, p.role].join(' ').toLowerCase().includes(search.toLowerCase())
-    const matchStatus = !statusFilter || p.status === statusFilter
+  async function handleSaveDocument(
+    e: FormEvent<HTMLFormElement>
+  ) {
+    e.preventDefault()
+
+    if (!selectedPerson) return
+
+    if (!selectedFile) {
+      alert('Selecciona un archivo antes de guardar.')
+      return
+    }
+
+    if (!beginOperation('Guardando archivo...')) return
+
+    try {
+      const fileData = await readFile(selectedFile)
+
+      const { data, error } = await supabase
+        .from('rrhh_documentos')
+        .insert([{
+          person_id: selectedPerson.id,
+          type: docValues.type,
+          date: docValues.date || null,
+          expiry: docValues.expiry || null,
+          note: docValues.note.trim(),
+          file_name: selectedFile.name,
+          file_data: fileData
+        }])
+        .select(DOC_COLUMNS)
+        .single()
+
+      if (error) throw error
+
+      // Actualizamos la lista sin recargar todos los documentos.
+      setDocs(current => [...current, data])
+      setSelectedFile(null)
+      setDocValues(emptyDocument())
+      setModalType('perfil')
+    } catch (error) {
+      console.error('Error guardando documento:', error)
+      alert(
+        `No se pudo completar el guardado: ${getErrorMessage(error)}`
+      )
+    } finally {
+      finishOperation()
+    }
+  }
+
+  async function handleDownload(doc: any) {
+    if (!beginOperation('Descargando archivo...')) return
+
+    setDownloadingId(String(doc.id))
+
+    try {
+      const { data, error } = await supabase
+        .from('rrhh_documentos')
+        .select('file_data, file_name')
+        .eq('id', doc.id)
+        .eq('person_id', doc.person_id)
+        .single()
+
+      if (error) throw error
+
+      if (!data?.file_data) {
+        throw new Error('Este documento no tiene un archivo adjunto.')
+      }
+
+      const blob = dataUrlToBlob(data.file_data)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+
+      link.href = url
+      link.download = data.file_name || 'documento'
+
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+
+      window.setTimeout(() => {
+        URL.revokeObjectURL(url)
+      }, 60000)
+    } catch (error) {
+      console.error('Error descargando documento:', error)
+      alert(`No se pudo descargar: ${getErrorMessage(error)}`)
+    } finally {
+      setDownloadingId(null)
+      finishOperation()
+    }
+  }
+
+  async function handleDeleteDocument(doc: any) {
+    if (operationRef.current || !selectedPerson) return
+
+    const confirmed = window.confirm(
+      `¿Eliminar definitivamente "${doc.file_name || doc.type}" de ${selectedPerson.name}?\n\nSe borrará este documento y su archivo adjunto. Esta acción no se puede deshacer.`
+    )
+
+    if (!confirmed) return
+    if (!beginOperation('Eliminando documento...')) return
+
+    setDeletingId(String(doc.id))
+
+    try {
+      const { data, error } = await supabase
+        .from('rrhh_documentos')
+        .delete()
+        .eq('id', doc.id)
+        .eq('person_id', selectedPerson.id)
+        .select('id')
+        .single()
+
+      if (error) throw error
+
+      if (!data) {
+        throw new Error(
+          'No se eliminó el documento. Revisa los permisos del usuario.'
+        )
+      }
+
+      setDocs(current =>
+        current.filter(item => !sameId(item.id, doc.id))
+      )
+    } catch (error) {
+      console.error('Error eliminando documento:', error)
+      alert(`No se pudo eliminar: ${getErrorMessage(error)}`)
+    } finally {
+      setDeletingId(null)
+      finishOperation()
+    }
+  }
+
+  const filtered = people.filter(person => {
+    const matchSearch = [
+      person.name,
+      person.rut,
+      person.role
+    ]
+      .join(' ')
+      .toLowerCase()
+      .includes(search.toLowerCase())
+
+    const matchStatus =
+      !statusFilter || person.status === statusFilter
+
     return matchSearch && matchStatus
   })
 
+  const personDocs = selectedPerson
+    ? docs.filter(doc =>
+        sameId(doc.person_id, selectedPerson.id)
+      )
+    : []
+
   if (loading) {
-    return <div className="p-8 text-sm text-slate-500 font-sans">Cargando personal externo...</div>
+    return (
+      <div className="p-8 text-sm text-slate-500 font-sans">
+        Cargando personal externo...
+      </div>
+    )
+  }
+
+  if (pageError) {
+    return (
+      <div className="p-8 space-y-4 font-sans">
+        <p className="text-sm text-red-700">
+          No se pudieron cargar los datos: {pageError}
+        </p>
+
+        <button
+          type="button"
+          onClick={() => void fetchData()}
+          className={primaryClass}
+        >
+          Reintentar
+        </button>
+      </div>
+    )
   }
 
   return (
     <div className="space-y-6 font-sans">
       <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-black text-amber-900">Personal externo</h1>
-          <p className="text-xs text-slate-500 mt-1">Control de servicios, honorarios, pagos e informes.</p>
+          <h1 className="text-2xl font-black text-amber-900">
+            Personal externo
+          </h1>
+
+          <p className="text-xs text-slate-500 mt-1">
+            Control de servicios, honorarios, pagos e informes.
+          </p>
         </div>
-        <button 
-          type="button" 
-          onClick={() => { setFormValues({ status: 'Activo' }); setModalType('agregar'); }}
-          className="px-4 py-2.5 bg-[#d9b354] text-slate-900 rounded-xl font-bold text-xs shadow-sm hover:brightness-105 transition"
+
+        <button
+          type="button"
+          onClick={openAdd}
+          className={primaryClass}
         >
           + Agregar
         </button>
       </div>
 
       <div className="flex gap-3 flex-wrap">
-        <input 
-          type="text" 
-          placeholder="Buscar por nombre, RUT o institución" 
-          value={search} 
+        <input
+          type="text"
+          placeholder="Buscar por nombre, RUT o servicio"
+          value={search}
           onChange={e => setSearch(e.target.value)}
-          className="max-w-xs text-xs p-2.5 bg-white border border-[#cabfae] rounded-xl font-medium" 
+          className="w-full max-w-xs text-xs p-2.5 bg-white border border-[#cabfae] rounded-xl font-medium"
         />
-        <select 
-          value={statusFilter} 
+
+        <select
+          value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
           className="max-w-xs text-xs p-2.5 bg-white border border-[#cabfae] rounded-xl font-medium"
         >
           <option value="">Todos los estados</option>
-          {EXTERNAL_STATUSES.map(s => <option key={s}>{s}</option>)}
+
+          {EXTERNAL_STATUSES.map(status => (
+            <option key={status} value={status}>
+              {status}
+            </option>
+          ))}
         </select>
       </div>
 
-      <div className="bg-white rounded-2xl border border-[#ddd4c3] overflow-x-auto shadow-xs">
+      <div className="bg-white rounded-2xl border border-[#ddd4c3] overflow-x-auto shadow-sm">
         <table className="w-full text-left text-xs min-w-[900px]">
           <thead>
             <tr className="bg-[#faf7f0] text-[10px] font-black uppercase text-slate-500 border-b">
@@ -107,67 +548,262 @@ export default function ExternosPage() {
               <th className="p-3.5">Acciones</th>
             </tr>
           </thead>
+
           <tbody className="divide-y">
-            {filtered.map((p: any) => {
-              const cantDocs = docs.filter((d: any) => Number(d.person_id) === Number(p.id)).length
+            {filtered.map(person => {
+              const count = docs.filter(doc =>
+                sameId(doc.person_id, person.id)
+              ).length
+
               return (
-                <tr key={p.id} className="hover:bg-slate-50">
-                  <td className="p-3.5 font-bold">{p.name}<br/><small className="text-slate-400 font-normal">{p.role}</small></td>
-                  <td className="p-3.5 font-mono">{p.rut}<br/><small className="text-slate-400">{p.email}<br/>{p.phone}</small></td>
-                  <td className="p-3.5">{p.role || '—'}</td>
-                  <td className="p-3.5 font-bold"><b>{cantDocs}</b> archivo(s)</td>
-                  <td className="p-3.5 font-bold text-emerald-700">{p.status}</td>
-                  <td className="p-3.5 flex gap-2 flex-wrap">
-                    <button type="button" onClick={() => { setSelectedPerson(p); setModalType('perfil'); }} className="px-3 py-1.5 bg-[#eee8db] rounded-lg font-bold text-[11px]">Ver perfil</button>
-                    <button type="button" onClick={() => { setSelectedPerson(p); setFormValues(p); setModalType('editar'); }} className="px-3 py-1.5 bg-[#eee8db] rounded-lg font-bold text-[11px]">Editar</button>
+                <tr
+                  key={person.id}
+                  className="hover:bg-slate-50"
+                >
+                  <td className="p-3.5 font-bold">
+                    {person.name}
+                    <br />
+                    <small className="text-slate-400 font-normal">
+                      {person.role}
+                    </small>
+                  </td>
+
+                  <td className="p-3.5 font-mono">
+                    {person.rut}
+                    <br />
+                    <small className="text-slate-400">
+                      {person.email}
+                      <br />
+                      {person.phone}
+                    </small>
+                  </td>
+
+                  <td className="p-3.5">
+                    {person.role || '—'}
+                  </td>
+
+                  <td className="p-3.5 font-bold">
+                    {count} documento(s)
+                  </td>
+
+                  <td className="p-3.5 font-bold text-emerald-700">
+                    {person.status}
+                  </td>
+
+                  <td className="p-3.5">
+                    <div className="flex gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedPerson(person)
+                          setModalType('perfil')
+                        }}
+                        className={buttonClass}
+                      >
+                        Ver perfil
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => openEdit(person)}
+                        className={buttonClass}
+                      >
+                        Editar
+                      </button>
+                    </div>
                   </td>
                 </tr>
               )
             })}
+
+            {filtered.length === 0 && (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="p-8 text-center text-slate-400"
+                >
+                  No hay personas para estos filtros.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
 
-      {/* MODALES */}
       {modalType && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-            
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+          >
+            {busy && (
+              <p
+                role="status"
+                className="text-xs font-bold text-amber-800"
+              >
+                {busy} Espera sin cerrar esta ventana.
+              </p>
+            )}
+
             {/* AGREGAR / EDITAR */}
-            {(modalType === 'agregar' || modalType === 'editar') && (
-              <form onSubmit={modalType === 'agregar' ? handleAdd : handleUpdate} className="space-y-4">
+            {(modalType === 'agregar' ||
+              modalType === 'editar') && (
+              <form
+                onSubmit={handleSavePerson}
+                className="space-y-4"
+              >
                 <div className="flex justify-between items-center border-b pb-3">
-                  <h2 className="text-lg font-black text-amber-900">{modalType === 'agregar' ? 'Agregar persona' : 'Editar perfil'}</h2>
-                  <button type="button" onClick={() => setModalType(null)} className="text-slate-400 font-bold">Cerrar</button>
+                  <h2 className="text-lg font-black text-amber-900">
+                    {modalType === 'agregar'
+                      ? 'Agregar personal externo'
+                      : 'Editar perfil'}
+                  </h2>
+
+                  <button
+                    type="button"
+                    disabled={!!busy}
+                    onClick={closeModal}
+                    className={buttonClass}
+                  >
+                    Cerrar
+                  </button>
                 </div>
-                <div className="grid grid-cols-2 gap-4 text-xs font-bold">
-                  <label className="col-span-2">Nombre completo:
-                    <input required type="text" defaultValue={formValues.name || ''} onChange={e => setFormValues({ ...formValues, name: e.target.value })} className="w-full mt-1 p-2.5 border rounded-xl font-normal" />
+
+                <fieldset
+                  disabled={!!busy}
+                  className="grid grid-cols-2 gap-4 text-xs font-bold"
+                >
+                  <label className="col-span-2">
+                    Nombre completo:
+                    <input
+                      required
+                      type="text"
+                      value={formValues.name}
+                      onChange={e =>
+                        setFormValues({
+                          ...formValues,
+                          name: e.target.value
+                        })
+                      }
+                      className={inputClass}
+                    />
                   </label>
-                  <label>RUT:
-                    <input required type="text" defaultValue={formValues.rut || ''} onChange={e => setFormValues({ ...formValues, rut: e.target.value })} className="w-full mt-1 p-2.5 border rounded-xl font-normal" />
+
+                  <label>
+                    RUT:
+                    <input
+                      required
+                      type="text"
+                      value={formValues.rut}
+                      onChange={e =>
+                        setFormValues({
+                          ...formValues,
+                          rut: e.target.value
+                        })
+                      }
+                      className={inputClass}
+                    />
                   </label>
-                  <label>Correo:
-                    <input type="email" defaultValue={formValues.email || ''} onChange={e => setFormValues({ ...formValues, email: e.target.value })} className="w-full mt-1 p-2.5 border rounded-xl font-normal" />
+
+                  <label>
+                    Correo:
+                    <input
+                      type="email"
+                      value={formValues.email}
+                      onChange={e =>
+                        setFormValues({
+                          ...formValues,
+                          email: e.target.value
+                        })
+                      }
+                      className={inputClass}
+                    />
                   </label>
-                  <label>Teléfono:
-                    <input type="text" defaultValue={formValues.phone || ''} onChange={e => setFormValues({ ...formValues, phone: e.target.value })} className="w-full mt-1 p-2.5 border rounded-xl font-normal" />
+
+                  <label>
+                    Teléfono:
+                    <input
+                      type="text"
+                      value={formValues.phone}
+                      onChange={e =>
+                        setFormValues({
+                          ...formValues,
+                          phone: e.target.value
+                        })
+                      }
+                      className={inputClass}
+                    />
                   </label>
-                  <label>Cargo, carrera o servicio:
-                    <input type="text" defaultValue={formValues.role || ''} onChange={e => setFormValues({ ...formValues, role: e.target.value })} className="w-full mt-1 p-2.5 border rounded-xl font-normal" />
+
+                  <label>
+                    Cargo o servicio:
+                    <input
+                      type="text"
+                      value={formValues.role}
+                      onChange={e =>
+                        setFormValues({
+                          ...formValues,
+                          role: e.target.value
+                        })
+                      }
+                      className={inputClass}
+                    />
                   </label>
-                  <label className="col-span-2">Estado:
-                    <select defaultValue={formValues.status || 'Activo'} onChange={e => setFormValues({ ...formValues, status: e.target.value })} className="w-full mt-1 p-2.5 border rounded-xl bg-white font-normal">
-                      {EXTERNAL_STATUSES.map(s => <option key={s}>{s}</option>)}
+
+                  <label className="col-span-2">
+                    Estado:
+                    <select
+                      value={formValues.status}
+                      onChange={e =>
+                        setFormValues({
+                          ...formValues,
+                          status: e.target.value
+                        })
+                      }
+                      className={inputClass}
+                    >
+                      {EXTERNAL_STATUSES.map(status => (
+                        <option key={status}>
+                          {status}
+                        </option>
+                      ))}
                     </select>
                   </label>
-                  <label className="col-span-2">Observaciones:
-                    <textarea defaultValue={formValues.notes || ''} onChange={e => setFormValues({ ...formValues, notes: e.target.value })} className="w-full mt-1 p-2.5 border rounded-xl font-normal" rows={3}></textarea>
+
+                  <label className="col-span-2">
+                    Observaciones:
+                    <textarea
+                      value={formValues.notes}
+                      onChange={e =>
+                        setFormValues({
+                          ...formValues,
+                          notes: e.target.value
+                        })
+                      }
+                      className={inputClass}
+                      rows={3}
+                    />
                   </label>
-                </div>
+                </fieldset>
+
                 <div className="flex justify-end gap-2 pt-4 border-t">
-                  <button type="button" onClick={() => setModalType(null)} className="px-4 py-2 bg-slate-100 rounded-xl text-xs font-bold">Cerrar</button>
-                  <button type="submit" className="px-4 py-2 bg-[#d9b354] rounded-xl text-xs font-bold shadow-sm">Guardar cambios</button>
+                  <button
+                    type="button"
+                    disabled={!!busy}
+                    onClick={closeModal}
+                    className={buttonClass}
+                  >
+                    Cerrar
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={!!busy}
+                    className={primaryClass}
+                  >
+                    {busy ? 'Guardando...' : 'Guardar cambios'}
+                  </button>
                 </div>
               </form>
             )}
@@ -175,106 +811,254 @@ export default function ExternosPage() {
             {/* VER PERFIL */}
             {modalType === 'perfil' && selectedPerson && (
               <div className="space-y-4">
-                <div className="flex justify-between items-center border-b pb-3">
+                <div className="flex justify-between items-center gap-3 border-b pb-3">
                   <div>
-                    <h2 className="text-xl font-black text-amber-900">{selectedPerson.name}</h2>
-                    <span className="text-[10px] uppercase font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full">Personal externo</span>
+                    <h2 className="text-xl font-black text-amber-900">
+                      {selectedPerson.name}
+                    </h2>
+
+                    <span className="text-[10px] uppercase font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full">
+                      Personal externo
+                    </span>
                   </div>
+
                   <div className="flex gap-2">
-                    <button type="button" onClick={() => { setFormValues(selectedPerson); setModalType('editar'); }} className="px-3 py-1.5 bg-[#eee8db] rounded-xl font-bold text-xs">Editar perfil</button>
-                    <button type="button" onClick={() => setModalType(null)} className="px-3 py-1.5 bg-slate-100 rounded-xl font-bold text-xs">Cerrar</button>
+                    <button
+                      type="button"
+                      disabled={!!busy}
+                      onClick={() => openEdit(selectedPerson)}
+                      className={buttonClass}
+                    >
+                      Editar perfil
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={!!busy}
+                      onClick={closeModal}
+                      className={buttonClass}
+                    >
+                      Cerrar
+                    </button>
                   </div>
-                </div>
-                <p className="text-xs text-slate-600"><b>RUT:</b> {selectedPerson.rut || '—'} · <b>Correo:</b> {selectedPerson.email || '—'} · <b>Teléfono:</b> {selectedPerson.phone || '—'}</p>
-                
-                <div className="flex justify-between items-center pt-2">
-                  <h3 className="text-sm font-black text-slate-800">Carpeta documental</h3>
-                  <button type="button" onClick={() => setModalType('agregarDoc')} className="px-3 py-1.5 bg-[#d9b354] text-slate-900 rounded-xl font-bold text-xs">+ Agregar documento</button>
                 </div>
 
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {docs.filter((d: any) => Number(d.person_id) === Number(selectedPerson.id)).map((d: any) => (
-                    <div key={d.id} className="p-3 border rounded-xl flex justify-between items-center text-xs">
-                      <div>
-                        <b>{d.type}</b> {d.file_name && <span className="text-amber-700 font-mono">({d.file_name})</span>}
-                        <br/><small className="text-slate-500">{d.date} · {d.note || 'Sin observaciones'}</small>
+                <p className="text-xs text-slate-600">
+                  <b>RUT:</b> {selectedPerson.rut || '—'} ·{' '}
+                  <b>Correo:</b> {selectedPerson.email || '—'} ·{' '}
+                  <b>Teléfono:</b> {selectedPerson.phone || '—'}
+                </p>
+
+                <p className="text-xs text-slate-600">
+                  Cargo o servicio: {selectedPerson.role || '—'} ·{' '}
+                  Estado: {selectedPerson.status || '—'}
+                </p>
+
+                <div className="flex justify-between items-center gap-3 pt-2">
+                  <h3 className="text-sm font-black text-slate-800">
+                    Carpeta documental
+                  </h3>
+
+                  <button
+                    type="button"
+                    disabled={!!busy}
+                    onClick={openAddDocument}
+                    className={primaryClass}
+                  >
+                    + Agregar documento
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {personDocs.map(doc => (
+                    <div
+                      key={doc.id}
+                      className="p-3 border rounded-xl flex justify-between items-center gap-3 flex-wrap text-xs"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <b>{doc.type}</b>
+
+                        {doc.file_name && (
+                          <span className="text-amber-700 font-mono break-all">
+                            {' '}({doc.file_name})
+                          </span>
+                        )}
+
+                        <br />
+
+                        <small className="text-slate-500">
+                          {doc.date || 'Sin fecha'} ·{' '}
+                          {doc.note || 'Sin observaciones'}
+                        </small>
                       </div>
-                      {d.file_data ? (
-                        <a href={d.file_data} download={d.file_name || 'documento'} className="px-3 py-1 bg-[#eee8db] rounded-lg font-bold text-[11px] text-amber-900">Descargar</a>
-                      ) : (
-                        <span className="text-emerald-700 font-bold">Registrado</span>
-                      )}
+
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={!!busy}
+                          onClick={() => void handleDownload(doc)}
+                          className={buttonClass}
+                        >
+                          {downloadingId === String(doc.id)
+                            ? 'Descargando...'
+                            : 'Descargar'}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={!!busy}
+                          onClick={() =>
+                            void handleDeleteDocument(doc)
+                          }
+                          className={dangerClass}
+                        >
+                          {deletingId === String(doc.id)
+                            ? 'ELIMINANDO...'
+                            : 'ELIMINAR'}
+                        </button>
+                      </div>
                     </div>
                   ))}
-                  {docs.filter((d: any) => Number(d.person_id) === Number(selectedPerson.id)).length === 0 && (
-                    <p className="text-center py-6 text-xs text-slate-400">Aún no hay documentos.</p>
+
+                  {personDocs.length === 0 && (
+                    <p className="text-center py-6 text-xs text-slate-400">
+                      Aún no hay documentos.
+                    </p>
                   )}
                 </div>
               </div>
             )}
 
-            {/* AGREGAR DOCUMENTO CON ARCHIVO */}
+            {/* AGREGAR DOCUMENTO */}
             {modalType === 'agregarDoc' && selectedPerson && (
-              <form onSubmit={async (e) => {
-                e.preventDefault()
-                const fileInput = (document.getElementById('fileUploadInput') as HTMLInputElement)?.files?.[0]
-                let file_data = ''
-                let file_name = ''
-                
-                if (fileInput) {
-                  file_name = fileInput.name
-                  file_data = await new Promise((resolve) => {
-                    const reader = new FileReader()
-                    reader.onload = () => resolve(reader.result as string)
-                    reader.readAsDataURL(fileInput)
-                  })
-                }
-
-                const { error } = await supabase.from('rrhh_documentos').insert([{
-                  person_id: selectedPerson.id,
-                  type: docValues.type,
-                  date: docValues.date,
-                  expiry: docValues.expiry,
-                  note: docValues.note,
-                  file_name,
-                  file_data
-                }])
-
-                if (!error) {
-                  setModalType('perfil')
-                  fetchData()
-                }
-              }} className="space-y-4">
+              <form
+                onSubmit={handleSaveDocument}
+                className="space-y-4"
+              >
                 <div className="flex justify-between items-center border-b pb-3">
-                  <h2 className="text-lg font-black text-amber-900">Agregar documento</h2>
-                  <button type="button" onClick={() => setModalType('perfil')} className="text-slate-400 font-bold">Volver</button>
+                  <h2 className="text-lg font-black text-amber-900">
+                    Agregar documento
+                  </h2>
+
+                  <button
+                    type="button"
+                    disabled={!!busy}
+                    onClick={() => setModalType('perfil')}
+                    className={buttonClass}
+                  >
+                    Volver
+                  </button>
                 </div>
-                <div className="grid grid-cols-2 gap-4 text-xs font-bold">
-                  <label className="col-span-2">Tipo de documento:
-                    <select value={docValues.type} onChange={e => setDocValues({ ...docValues, type: e.target.value })} className="w-full mt-1 p-2.5 border rounded-xl bg-white font-normal">
-                      {TYPES_DOCS.map(t => <option key={t}>{t}</option>)}
+
+                <fieldset
+                  disabled={!!busy}
+                  className="grid grid-cols-2 gap-4 text-xs font-bold"
+                >
+                  <label className="col-span-2">
+                    Tipo de documento:
+                    <select
+                      value={docValues.type}
+                      onChange={e =>
+                        setDocValues({
+                          ...docValues,
+                          type: e.target.value
+                        })
+                      }
+                      className={inputClass}
+                    >
+                      {TYPES_DOCS.map(type => (
+                        <option key={type}>{type}</option>
+                      ))}
                     </select>
                   </label>
-                  <label>Fecha:
-                    <input type="date" value={docValues.date} onChange={e => setDocValues({ ...docValues, date: e.target.value })} className="w-full mt-1 p-2.5 border rounded-xl font-normal" />
+
+                  <label>
+                    Fecha:
+                    <input
+                      required
+                      type="date"
+                      value={docValues.date}
+                      onChange={e =>
+                        setDocValues({
+                          ...docValues,
+                          date: e.target.value
+                        })
+                      }
+                      className={inputClass}
+                    />
                   </label>
-                  <label>Vencimiento:
-                    <input type="date" onChange={e => setDocValues({ ...docValues, expiry: e.target.value })} className="w-full mt-1 p-2.5 border rounded-xl font-normal" />
+
+                  <label>
+                    Vencimiento:
+                    <input
+                      type="date"
+                      value={docValues.expiry}
+                      onChange={e =>
+                        setDocValues({
+                          ...docValues,
+                          expiry: e.target.value
+                        })
+                      }
+                      className={inputClass}
+                    />
                   </label>
-                  <label className="col-span-2">Archivo:
-                    <input id="fileUploadInput" type="file" className="w-full mt-1 p-2 border rounded-xl font-normal bg-white text-xs file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-[#eee8db] file:text-slate-700 hover:file:bg-[#e2dcd0]" />
+
+                  <label className="col-span-2">
+                    Archivo:
+                    <input
+                      required
+                      type="file"
+                      onChange={e =>
+                        setSelectedFile(e.target.files?.[0] || null)
+                      }
+                      className="w-full mt-1 p-2 border rounded-xl font-normal bg-white text-xs file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-[#eee8db]"
+                    />
+
+                    {selectedFile && (
+                      <span className="block mt-2 text-slate-500 font-normal break-all">
+                        Seleccionado: {selectedFile.name}
+                      </span>
+                    )}
                   </label>
-                  <label className="col-span-2">Observaciones:
-                    <textarea onChange={e => setDocValues({ ...docValues, note: e.target.value })} className="w-full mt-1 p-2.5 border rounded-xl font-normal" rows={3}></textarea>
+
+                  <label className="col-span-2">
+                    Observaciones:
+                    <textarea
+                      value={docValues.note}
+                      onChange={e =>
+                        setDocValues({
+                          ...docValues,
+                          note: e.target.value
+                        })
+                      }
+                      className={inputClass}
+                      rows={3}
+                    />
                   </label>
-                </div>
+                </fieldset>
+
                 <div className="flex justify-end gap-2 pt-4 border-t">
-                  <button type="button" onClick={() => setModalType('perfil')} className="px-4 py-2 bg-slate-100 rounded-xl text-xs font-bold">Volver</button>
-                  <button type="submit" className="px-4 py-2 bg-[#d9b354] rounded-xl text-xs font-bold shadow-sm">Guardar documento</button>
+                  <button
+                    type="button"
+                    disabled={!!busy}
+                    onClick={() => setModalType('perfil')}
+                    className={buttonClass}
+                  >
+                    Volver
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={!!busy}
+                    className={primaryClass}
+                  >
+                    {busy
+                      ? 'Guardando archivo...'
+                      : 'Guardar documento'}
+                  </button>
                 </div>
               </form>
             )}
-
           </div>
         </div>
       )}
