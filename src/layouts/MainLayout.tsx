@@ -104,6 +104,7 @@ export default function MainLayout() {
   const [userEmail, setUserEmail] = useState<string>('')
   const [isOfFisicaOnly, setIsOfFisicaOnly] = useState<boolean>(false)
   const [isRRHHOnly, setIsRRHHOnly] = useState<boolean>(false)
+  const [isRoleResolved, setIsRoleResolved] = useState(false)
   
   const alertCount = notificationFeed.alerts.length
 
@@ -135,7 +136,7 @@ export default function MainLayout() {
         }
       }
     }
-    void fetchUserRoleAndEmail()
+    void fetchUserRoleAndEmail().finally(() => setIsRoleResolved(true))
   }, [location.pathname, navigate])
 
   const currentModule = location.pathname.startsWith('/finanzas') 
@@ -161,6 +162,7 @@ export default function MainLayout() {
   }, [])
 
   useEffect(() => {
+    if (!isRoleResolved || isRRHHOnly) return
     const requestId = window.setTimeout(() => void loadNotifications(), 0)
     window.addEventListener(PAYMENTS_UPDATED_EVENT, loadNotifications)
     window.addEventListener(EMPRESAS_UPDATED_EVENT, loadNotifications)
@@ -169,7 +171,7 @@ export default function MainLayout() {
       window.removeEventListener(PAYMENTS_UPDATED_EVENT, loadNotifications)
       window.removeEventListener(EMPRESAS_UPDATED_EVENT, loadNotifications)
     }
-  }, [loadNotifications])
+  }, [loadNotifications, isRoleResolved, isRRHHOnly])
 
   useEffect(() => {
     if (!isNotificationsOpen) return
@@ -348,6 +350,7 @@ export default function MainLayout() {
               </div>
             )}
             
+            {!isRRHHOnly && (
             <div ref={notificationsRef} className="relative">
               <button
                 type="button"
@@ -405,6 +408,7 @@ export default function MainLayout() {
                 </section>
               )}
             </div>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
