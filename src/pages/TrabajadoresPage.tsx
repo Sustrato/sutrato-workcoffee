@@ -16,8 +16,10 @@ const TYPES_DOCS = [
   'Otro documento'
 ]
 
+const STORAGE_BUCKET = 'rrhh-documentos'
+
 const DOC_COLUMNS =
-  'id, person_id, type, date, expiry, note, file_name'
+  'id, person_id, type, date, expiry, note, file_name, file_path'
 
 const inputClass =
   'w-full mt-1 p-2.5 border rounded-xl bg-white font-normal'
@@ -93,28 +95,10 @@ function getPersonForm(person: any = {}) {
   }
 }
 
-function readFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result)
-      } else {
-        reject(new Error('No se pudo leer el archivo.'))
-      }
-    }
-
-    reader.onerror = () => {
-      reject(reader.error || new Error('Error leyendo el archivo.'))
-    }
-
-    reader.onabort = () => {
-      reject(new Error('La lectura del archivo fue cancelada.'))
-    }
-
-    reader.readAsDataURL(file)
-  })
+function createStoragePath(personId: string | number, file: File) {
+  const extension = file.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin'
+  const uniqueId = crypto.randomUUID()
+  return `trabajadores/${personId}/${uniqueId}.${extension}`
 }
 
 function dataUrlToBlob(dataUrl: string) {
@@ -385,8 +369,19 @@ export default function TrabajadoresPage() {
 
     if (!beginOperation('Guardando archivo...')) return
 
+    let uploadedPath: string | null = null
+
     try {
-      const fileData = await readFile(selectedFile)
+      const path = createStoragePath(selectedPerson.id, selectedFile)
+      const { error: uploadError } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .upload(path, selectedFile, {
+          contentType: selectedFile.type || 'application/octet-stream',
+          upsert: false
+        })
+
+      if (uploadError) throw uploadError
+      uploadedPath = path
 
       const { data, error } = await supabase
         .from('rrhh_documentos')
@@ -397,23 +392,29 @@ export default function TrabajadoresPage() {
           expiry: docValues.expiry || null,
           note: docValues.note.trim(),
           file_name: selectedFile.name,
-          file_data: fileData
+          file_path: path
         }])
         .select(DOC_COLUMNS)
         .single()
 
       if (error) throw error
 
-      // Actualizamos sin volver a descargar todos los documentos.
       setDocs(current => [...current, data])
       setSelectedFile(null)
       setDocValues(emptyDocument())
       setModalType('perfil')
     } catch (error) {
+      // Si falló el registro SQL, no dejamos un archivo huérfano.
+      if (uploadedPath) {
+        const { error: cleanupError } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .remove([uploadedPath])
+        if (cleanupError) {
+          console.error('No se pudo revertir la subida:', cleanupError)
+        }
+      }
       console.error('Error guardando documento:', error)
-      alert(
-        `No se pudo completar el guardado: ${getErrorMessage(error)}`
-      )
+      alert(`No se pudo completar el guardado: ${getErrorMessage(error)}`)
     } finally {
       finishOperation()
     }
@@ -425,33 +426,42 @@ export default function TrabajadoresPage() {
     setDownloadingId(String(doc.id))
 
     try {
-      const { data, error } = await supabase
-        .from('rrhh_documentos')
-        .select('file_data, file_name')
-        .eq('id', doc.id)
-        .eq('person_id', doc.person_id)
-        .single()
+      let blob: Blob
+      let fileName = doc.file_name || 'documento'
 
-      if (error) throw error
+      if (doc.file_path) {
+        const { data, error } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .download(doc.file_path)
 
-      if (!data?.file_data) {
-        throw new Error('Este documento no tiene un archivo adjunto.')
+        if (error) throw error
+        if (!data) throw new Error('No se pudo descargar el archivo.')
+        blob = data
+      } else {
+        // Compatibilidad con documentos antiguos que siguen en file_data.
+        const { data, error } = await supabase
+          .from('rrhh_documentos')
+          .select('file_data, file_name')
+          .eq('id', doc.id)
+          .eq('person_id', doc.person_id)
+          .single()
+
+        if (error) throw error
+        if (!data?.file_data) {
+          throw new Error('Este documento no tiene un archivo adjunto.')
+        }
+        blob = dataUrlToBlob(data.file_data)
+        fileName = data.file_name || fileName
       }
 
-      const blob = dataUrlToBlob(data.file_data)
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
-
       link.href = url
-      link.download = data.file_name || 'documento'
-
+      link.download = fileName
       document.body.appendChild(link)
       link.click()
       link.remove()
-
-      window.setTimeout(() => {
-        URL.revokeObjectURL(url)
-      }, 60000)
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000)
     } catch (error) {
       console.error('Error descargando documento:', error)
       alert(`No se pudo descargar: ${getErrorMessage(error)}`)
@@ -474,6 +484,8 @@ export default function TrabajadoresPage() {
     setDeletingId(String(doc.id))
 
     try {
+      // Primero eliminamos el registro. Si Storage falla, queda un archivo
+      // huérfano recuperable, no una referencia rota en la aplicación.
       const { data, error } = await supabase
         .from('rrhh_documentos')
         .delete()
@@ -483,16 +495,24 @@ export default function TrabajadoresPage() {
         .single()
 
       if (error) throw error
-
       if (!data) {
-        throw new Error(
-          'No se eliminó el documento. Revisa los permisos del usuario.'
-        )
+        throw new Error('No se eliminó el documento. Revisa los permisos.')
       }
 
       setDocs(current =>
         current.filter(item => !sameId(item.id, doc.id))
       )
+
+      if (doc.file_path) {
+        const { error: storageError } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .remove([doc.file_path])
+
+        if (storageError) {
+          console.error('Archivo huérfano en Storage:', doc.file_path, storageError)
+          alert('Se eliminó el registro, pero no el archivo en Storage. Un administrador debe revisar el archivo restante.')
+        }
+      }
     } catch (error) {
       console.error('Error eliminando documento:', error)
       alert(`No se pudo eliminar: ${getErrorMessage(error)}`)

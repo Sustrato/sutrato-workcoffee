@@ -10,6 +10,9 @@ const PRACTICE_STATUSES = [
   'Práctica aprobada'
 ]
 
+const STORAGE_BUCKET = 'rrhh-documentos'
+const DOC_COLUMNS = 'id, person_id, type, date, expiry, note, file_name, file_path'
+
 const TYPES_DOCS = [
   'Convenio de práctica',
   'Seguro escolar',
@@ -98,30 +101,6 @@ function getPersonForm(person: any) {
   }
 }
 
-function readFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result)
-      } else {
-        reject(new Error('No se pudo leer el archivo.'))
-      }
-    }
-
-    reader.onerror = () => {
-      reject(reader.error || new Error('Error leyendo el archivo.'))
-    }
-
-    reader.onabort = () => {
-      reject(new Error('La lectura del archivo fue cancelada.'))
-    }
-
-    reader.readAsDataURL(file)
-  })
-}
-
 function dataUrlToBlob(dataUrl: string) {
   const comma = dataUrl.indexOf(',')
 
@@ -194,7 +173,7 @@ export default function PracticantesPage() {
 
         supabase
           .from('rrhh_documentos')
-          .select('id, person_id, type, date, expiry, note, file_name')
+          .select(DOC_COLUMNS)
       ])
 
       if (peopleResult.error) throw peopleResult.error
@@ -428,18 +407,24 @@ export default function PracticantesPage() {
 
   async function handleSaveDocument(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-
     if (!selectedPerson) return
-
     if (!selectedFile) {
       alert('Selecciona un archivo antes de guardar.')
       return
     }
-
     if (!startSaving()) return
 
+    const path = `practicantes/${selectedPerson.id}/${crypto.randomUUID()}/${selectedFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    let uploaded = false
     try {
-      const fileData = await readFile(selectedFile)
+      const { error: uploadError } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .upload(path, selectedFile, {
+          contentType: selectedFile.type || 'application/octet-stream',
+          upsert: false
+        })
+      if (uploadError) throw uploadError
+      uploaded = true
 
       const { data, error } = await supabase
         .from('rrhh_documentos')
@@ -450,24 +435,23 @@ export default function PracticantesPage() {
           expiry: docValues.expiry || null,
           note: docValues.note.trim(),
           file_name: selectedFile.name,
-          file_data: fileData
+          file_path: path
         }])
-        // La respuesta tampoco vuelve a traer el archivo completo.
-        .select('id, person_id, type, date, expiry, note, file_name')
+        .select(DOC_COLUMNS)
         .single()
-
       if (error) throw error
 
-      // Actualizamos la lista sin recargar todos los documentos.
       setDocs(current => [...current, data])
       setDocValues(emptyDocument())
       setSelectedFile(null)
       setModalType('perfil')
     } catch (error) {
+      if (uploaded) {
+        const { error: cleanupError } = await supabase.storage.from(STORAGE_BUCKET).remove([path])
+        if (cleanupError) console.warn('No se pudo limpiar el archivo subido:', cleanupError)
+      }
       console.error('Error guardando documento:', error)
-      alert(
-        `No se pudo completar el guardado: ${getErrorMessage(error)}`
-      )
+      alert(`No se pudo completar el guardado: ${getErrorMessage(error)}`)
     } finally {
       finishSaving()
     }
@@ -477,14 +461,21 @@ export default function PracticantesPage() {
     if (savingRef.current || downloadingRef.current || !selectedPerson) return
 
     const confirmed = window.confirm(
-      `¿Eliminar definitivamente "${doc.file_name || doc.type}" de ${selectedPerson.name}?\n\nSe eliminará este documento y su archivo adjunto. Esta acción no se puede deshacer.`
+      `¿Eliminar definitivamente "${doc.file_name || doc.type}" de ${selectedPerson.name}?\n\nEsta acción no se puede deshacer.`
     )
-
     if (!confirmed || !startSaving()) return
 
     setDeletingId(String(doc.id))
-
     try {
+      // Eliminamos primero el archivo de Storage. Si falla, mantenemos el registro.
+      // Los documentos antiguos solo tienen file_data y no requieren este paso.
+      if (doc.file_path) {
+        const { error: storageError } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .remove([doc.file_path])
+        if (storageError) throw storageError
+      }
+
       const { data, error } = await supabase
         .from('rrhh_documentos')
         .delete()
@@ -492,16 +483,13 @@ export default function PracticantesPage() {
         .eq('person_id', selectedPerson.id)
         .select('id')
         .single()
-
       if (error) throw error
-      if (!data) {
-        throw new Error('No se eliminó el documento. Revisa los permisos del usuario.')
-      }
+      if (!data) throw new Error('No se eliminó el documento. Revisa los permisos del usuario.')
 
       setDocs(current => current.filter(item => !sameId(item.id, doc.id)))
     } catch (error) {
       console.error('Error eliminando documento:', error)
-      alert(`No se pudo eliminar el documento: ${getErrorMessage(error)}`)
+      alert(`No se pudo eliminar el documento: ${getErrorMessage(error)}. Si el archivo ya se borró de Storage, el registro puede necesitar reparación.`)
     } finally {
       setDeletingId(null)
       finishSaving()
@@ -510,38 +498,40 @@ export default function PracticantesPage() {
 
   async function handleDownload(doc: any) {
     if (downloadingRef.current || savingRef.current) return
-
     downloadingRef.current = true
     setDownloadingId(String(doc.id))
 
     try {
-      // Solo pedimos el archivo elegido cuando lo necesitan.
-      const { data, error } = await supabase
-        .from('rrhh_documentos')
-        .select('file_data, file_name')
-        .eq('id', doc.id)
-        .single()
-
-      if (error) throw error
-
-      if (!data?.file_data) {
-        alert('Este documento no tiene un archivo adjunto.')
-        return
+      let blob: Blob
+      let fileName = doc.file_name || 'documento'
+      if (doc.file_path) {
+        const { data, error } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .download(doc.file_path)
+        if (error) throw error
+        blob = data
+      } else {
+        // Compatibilidad con documentos anteriores guardados como Base64.
+        const { data, error } = await supabase
+          .from('rrhh_documentos')
+          .select('file_data, file_name')
+          .eq('id', doc.id)
+          .eq('person_id', doc.person_id)
+          .single()
+        if (error) throw error
+        if (!data?.file_data) throw new Error('Este documento no tiene archivo adjunto.')
+        blob = dataUrlToBlob(data.file_data)
+        fileName = data.file_name || fileName
       }
 
-      const blob = dataUrlToBlob(data.file_data)
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
-
       link.href = url
-      link.download = data.file_name || 'documento'
+      link.download = fileName
       document.body.appendChild(link)
       link.click()
       link.remove()
-
-      window.setTimeout(() => {
-        URL.revokeObjectURL(url)
-      }, 60000)
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000)
     } catch (error) {
       console.error('Error descargando documento:', error)
       alert(`No se pudo descargar: ${getErrorMessage(error)}`)
